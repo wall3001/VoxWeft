@@ -5,7 +5,7 @@ description = "On-device simultaneous interpretation & voice dialogue on Apple S
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
-authors = [{name = "OpenBMB / VoxWeft contributors"}]
+authors = [{name = "VoxWeft contributors"}]
 keywords = ["tts", "mlx", "apple-silicon", "simultaneous-interpretation", "voxcpm", "voice-clone", "speech-to-speech"]
 dependencies = [
     "mlx>=0.30",
@@ -14,6 +14,12 @@ dependencies = [
     "soundfile",
     "scipy",
 ]
+
+[project.urls]
+Homepage = "https://github.com/OpenBMB/VoxWeft"
+Repository = "https://github.com/OpenBMB/VoxWeft"
+Issues = "https://github.com/OpenBMB/VoxWeft/issues"
+Devlog = "https://github.com/OpenBMB/VoxWeft/blob/main/docs/DEVLOG.md"
 
 [project.optional-dependencies]
 # L2 runtime: bridge (TTS+ASR HTTP) + WebSocket server + MLX LLM/ASR adapters.

@@ -1,3 +1,5 @@
+# Copyright 2026 VoxWeft contributors. Licensed under the Apache License 2.0.
+# MLX port of OpenBMB VoxCPM2 (Apache-2.0, Copyright OpenBMB) — see NOTICE.
 """VoxCPM2 in MLX — direct port of nanovllm-voxcpm's voxcpm2/model.py.
 
 Weight names mirror the checkpoint exactly (q/k/v/gate/up unpacked), so

@@ -118,7 +118,7 @@ class IncrementalSegmenter:
         self._max_carry_samples = int(max_carry_s * SR)
         # 超长句的「软强切」：不再见到一个 32ms 低能量帧就切（那多半是音节间的
         # 凹陷，刀口落在词中间，两侧的词都废），而是要求 ≥long_min_silence_s 的
-        # 连续静音——词边界的停顿量级。实测（voxlab，vi/lo 真人朗读）：原策略让
+        # 连续静音——词边界的停顿量级。实测（M2 16GB，vi/lo 真人朗读）：原策略让
         # 商用 ASR 的 CER 从 4.7% 涨到 16.3%，开源 ASR 从 10% 涨到 21%。
         self._long_min_silence_frames = max(1, int(long_min_silence_s / FRAME_S))
         # 连这点停顿都等不到（连读播音），到 max_utterance + hard_extra 时在最近
@@ -129,7 +129,7 @@ class IncrementalSegmenter:
         self._dead = False
         # 自适应门限：跟踪噪声底（最小值统计，慢速回升），门限 = 噪声底 × noise_ratio，
         # 夹在 [thresh_floor, sil_thresh]。固定 0.035 是给展台近讲麦调的：手机录音
-        # 中位帧 RMS 只有 0.02，70% 的语音帧被当静音（voxlab 实测），轻声起头的词
+        # 中位帧 RMS 只有 0.02，70% 的语音帧被当静音（M2 实测），轻声起头的词
         # 直接被丢。
         self._adaptive = adaptive
         self._noise_ratio = noise_ratio

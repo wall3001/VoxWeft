@@ -126,6 +126,8 @@ VoxCPM2 的 `temperature` **不是采样温度**，而是流匹配起点的噪�
 
 ## 四、复现用的脚本
 
+> 这些探针脚本是展台构建的一部分，**未随本仓库发布**；等价的检查见 `scripts/probe_onset.py`、`scripts/probe_stream.py` 与 `bench/bench_tts.py` + `bench/judge_tts.py`。下面保留原始命令仅作记录。
+
 | 脚本 | 用途 |
 |---|---|
 | `tts_check.py` | 首响 + 波形体检（DC/削波/首尾/块边界） |
@@ -138,5 +140,5 @@ VoxCPM2 的 `temperature` **不是采样温度**，而是流匹配起点的噪�
 都直接在 M3 上跑：
 
 ```bash
-cd ~/crossweft && ~/crossweft/.venv/bin/python tts_check.py --lang zh --repeat 3
+python tts_check.py --lang zh --repeat 3
 ```

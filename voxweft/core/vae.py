@@ -1,3 +1,5 @@
+# Copyright 2026 VoxWeft contributors. Licensed under the Apache License 2.0.
+# MLX port of OpenBMB VoxCPM2 (Apache-2.0, Copyright OpenBMB) — see NOTICE.
 """AudioVAE-V2 decoder in MLX (decode path — latent → 48 kHz waveform).
 
 Torch reference: nanovllm_voxcpm/layers/audio_vae_v2.py. Weight-norm is

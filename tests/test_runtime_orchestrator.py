@@ -1,6 +1,6 @@
 """Orchestrator 测试 —— 用假引擎，不需要模型/网络。
 
-    cd crossweft/m3 && python3 test_orchestrator.py
+    pytest tests/test_runtime_orchestrator.py
 
 验的是**编排正确性**：事件顺序、级联重叠、模式差异、打断行为。
 模型的输出质量不在这里测（那是验收素材的事）。

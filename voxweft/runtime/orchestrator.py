@@ -1,4 +1,4 @@
-"""Crossweft v2 编排 — 同传(interpreter) + 语音对话(agent)，同一端点两种 mode。
+"""VoxWeft 编排 — 同传(interpreter) + 语音对话(agent)，同一端点两种 mode。
 
 替代 ws_server.py 里的 `ws_crossweft` 批量实现。区别在输入侧：
 
@@ -141,6 +141,7 @@ class Orchestrator:
         self.canon: dict[str, str] = {}
 
         # 对话模式的状态
+        self.llm_missing = False          # set by the host when agent mode has no LLM
         self.system_prompt = system_prompt
         self._history: list[dict] = []
         self._max_history = max_history
@@ -150,6 +151,9 @@ class Orchestrator:
             # Keep long conference turns responsive. Natural silence/SmartTurn
             # still wins; this is only the fallback for uninterrupted speech.
             max_utterance_s=float(os.environ.get("VOXWEFT_MAX_UTTERANCE_S", "6.0")),
+            # Adaptive noise floor: measured CER 16.3% → 10% on phone-mic
+            # audio vs the fixed 0.035 stage-mic threshold (DEVLOG §4.3).
+            adaptive=os.environ.get("VOXWEFT_ADAPTIVE_THRESH", "1") == "1",
             smart_turn=smart_turn,
             use_smart_turn=use_smart_turn)
 
@@ -324,6 +328,18 @@ class Orchestrator:
             "type": "translation", "seq": seq, "src": src_text,
             "text": tgt_text, "latency_ms": round(tr.get("latency_ms", 0))})
         if not tgt_text:
+            # Translators report failure as {"text": "", "error": ...} rather
+            # than raising (e.g. NLLB fallback with torch not installed).
+            # Surface it: an empty translation with no error and no turn_end
+            # leaves the client on "translating" forever.
+            err = tr.get("error")
+            if err:
+                await self.send_json({"type": "error", "seq": seq,
+                                      "stage": "translate", "message": str(err)})
+            if seq == self._seq:
+                await self.send_json({
+                    "type": "turn_end", "sentences": 0,
+                    "total_ms": round((time.perf_counter() - t0) * 1000)})
             return
 
         await self._synth_and_send(seq, tgt_text, self.routes.voice_role)
@@ -360,7 +376,19 @@ class Orchestrator:
         # LLM 流式切句 → 逐句 TTS。句在生成时就能开合成，不等整段。
         n_sent = 0
         full = ""
-        llm = self.engines["llm"]
+        llm = self.engines.get("llm")
+        if llm is None:
+            # Agent mode was configured without an LLM (NLLB-only translator).
+            # Say so per turn instead of dying with KeyError after
+            # state=speaking and leaving the client stuck on "thinking".
+            await self.send_json({
+                "type": "error", "seq": seq, "stage": "llm",
+                "message": "agent mode needs an LLM (set VOXWEFT_LLM_DIR)"})
+            await self.send_json({"type": "state", "state": "idle"})
+            if seq == self._seq:
+                await self.send_json({"type": "turn_end", "sentences": 0,
+                                      "total_ms": round((time.perf_counter() - t0) * 1000)})
+            return
         for s in llm.stream_sentences(user_text, system_prompt=self.system_prompt,
                                       history=self._history):
             if self._cancel.is_set():

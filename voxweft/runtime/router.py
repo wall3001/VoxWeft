@@ -178,7 +178,7 @@ def route_translate(src_lang: str, tgt_lang: str,
         护栏失败回退 NLLB。
       * SEA↔SEA：NLLB 直译，不经中文中转。
 
-    `use_llm_zh_to_sea` 是现场逃生开关（VOXWEFT_USE_LLM_ZH_TO_LO=1）：
+    `use_llm_zh_to_sea` 是现场逃生开关（VOXWEFT_USE_LLM_ZH_TO_SEA=1）：
     打开后连第一类也交给 LLM。默认关。
     """
     src, tgt = normalize(src_lang), normalize(tgt_lang)

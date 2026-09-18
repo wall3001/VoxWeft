@@ -402,6 +402,29 @@ fixed it at the source. But long hotword lists perturb decoding on short
 segments; keep them sparse. Chinese homophone traps that were real:
 端侧→端测, 切段→切断, 出声→出生.
 
+### 6.4 The ASR bridge decoded WAV headers as audio — for the whole stage run
+
+**Found by** code review after open-sourcing, not by listening.
+
+The runtime sends each segment as a base64 RIFF WAV; the bridge did
+`np.frombuffer(wav_bytes, dtype=np.int16)` on the entire payload. The 44-byte
+header became 22 samples at up to ±0.98 — a 1.4 ms full-scale click glued to
+the front of every ASR input, for every language, throughout the exhibition.
+Recognition still worked (the models are robust to 1 ms of noise), which is
+exactly why nobody noticed. Fix: decode with `soundfile`, resample if needed.
+
+**Also caught in the same review** and fixed in commit 3: the shipped default
+ASR (stock Qwen3-ASR-1.7B) was being forced to decode Lao/Khmer/Burmese
+under labels it never saw — the router still described the private
+fine-tune; the NLLB fallback returning `{"text": "", "error": …}` was
+emitted as an empty translation with no `error` and no `turn_end`; a TTS
+exception mid-stream ended as a clean HTTP 200; `text_input` in agent mode
+never synthesized; the adaptive threshold the README advertised was never
+enabled in the runtime; the Swift client wrote every ASR result into the
+*last* turn instead of matching `seq`. Six of ten were "the docs describe
+the fix, the code doesn't have it" — which is what happens when the devlog
+is written before the extraction is finished.
+
 ---
 
 ## 7. Build & deploy on macOS

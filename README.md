@@ -17,7 +17,8 @@ Around it: a runtime that turns a microphone into segmented, translated,
 spoken output while the speaker is still talking.
 
 ```
-pip install voxweft            # L1 only: TTS, clone, CLI, MCP
+pip install voxweft            # L1 only: TTS, clone, CLI
+pip install "voxweft[mcp]"     # + MCP server for agent harnesses
 pip install "voxweft[runtime]" # + segmenter, ASR/LLM adapters, WebSocket server
 ```
 
@@ -88,6 +89,7 @@ WebSocket.
 pip install "voxweft[runtime]"
 export VOXWEFT_MODEL_DIR=~/.voxweft/models         # VoxCPM2/, Qwen3-ASR-1.7B/, <llm>/
 export VOXWEFT_LLM_DIR=$VOXWEFT_MODEL_DIR/Qwen3-4B-Instruct-2507-4bit
+export VOXWEFT_VOICE_PROMPT_WAV=~/my_voice.wav   # ~5 s reference; pins one speaker for the session
 
 voxweft bridge --port 8133 &      # wait for GET /ready → 200
 voxweft serve  --port 3100        # ws://localhost:3100/ws/voice/v2
@@ -103,7 +105,7 @@ with the measured level when nothing was cut.
 | slot | default | alt | licence |
 |---|---|---|---|
 | TTS | VoxCPM2 (4-bit) | — | Apache-2.0 |
-| ASR | Qwen3-ASR-1.7B via mlx-audio | Qwen3-ASR-0.6B · whisper-large-v3-turbo (MLX) | Apache-2.0 |
+| ASR | Qwen3-ASR-1.7B via mlx-audio (zh/en/vi/th/id/ms + 20 more; **no lo/km/my** — those fall back to auto-LID unless you plug a fine-tune) | Qwen3-ASR-0.6B · whisper-large-v3-turbo (MLX) | Apache-2.0 |
 | LLM / MT | Qwen3-4B-Instruct (mlx-lm) | Qwen3-8B · Hy-MT2-1.8B | Apache-2.0 |
 | MT fallback | NLLB-200-1.3B | — | **CC-BY-NC-4.0**, opt-in, research only |
 
@@ -113,7 +115,7 @@ No model weights are in this repo. `docs/MODELS.md` has download notes
 ## What the runtime does that a model download doesn't
 
 * **Cuts while you speak.** Per-frame RMS with an adaptive noise floor,
-  0.45 s silence rule, soft forced cut at 6 s, and a *carry* buffer so a
+  0.45 s silence rule, forced cut at the first ≥100 ms dip after 6 s (hard cut at 9 s), and a *carry* buffer so a
   0.4 s "So," is prepended to the next segment instead of silently dropped.
   Learned end-of-turn (SmartTurn v3) is wired in and **off by default** — we
   measured it net-negative for interpretation and say why.

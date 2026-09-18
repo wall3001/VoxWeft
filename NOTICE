@@ -1,0 +1,19 @@
+VoxWeft
+Copyright 2026 VoxWeft contributors
+
+This product includes software developed by OpenBMB:
+
+  voxweft/core/model.py and voxweft/core/vae.py are an MLX port of the VoxCPM2
+  model implementation from OpenBMB/VoxCPM and OpenBMB/nanovllm-voxcpm
+  (https://github.com/OpenBMB/VoxCPM), Copyright OpenBMB, licensed under the
+  Apache License, Version 2.0. Model weights are distributed separately by
+  OpenBMB under their own terms.
+
+  voxweft/runtime/segmenter.py, router.py, orchestrator.py and translator.py
+  originated in an internal exhibition build and are released here by their
+  authors under the Apache License, Version 2.0.
+
+Third-party runtime dependencies (MLX, mlx-lm, mlx-audio, Qwen3-ASR, pipecat
+SmartTurn, NLLB-200) retain their own licences; see docs/MODELS.md for the
+model-weight licences, including the CC-BY-NC-4.0 NLLB weights that are
+opt-in only.

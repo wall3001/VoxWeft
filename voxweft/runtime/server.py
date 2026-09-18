@@ -51,7 +51,8 @@ GLOSSARY_PATH = os.environ.get(
     "VOXWEFT_GLOSSARY_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "glossary.json"))
 USE_LLM_TRANSLATOR = bool(LLM_DIR)
-USE_LLM_ZH_TO_SEA = os.environ.get("VOXWEFT_USE_LLM_ZH_TO_SEA", "0") == "1"
+USE_LLM_ZH_TO_SEA = (os.environ.get("VOXWEFT_USE_LLM_ZH_TO_SEA")
+                     or os.environ.get("VOXWEFT_USE_LLM_ZH_TO_LO", "0")) == "1"
 # SmartTurn v3 endpointing. Measured net-negative for interpretation (it is a
 # dialogue "did they finish?" model; in continuous speech it blocks the silence
 # cut and everything falls through to the forced cut). Off by default; flip on
@@ -142,6 +143,36 @@ def _bridge_tts_stream(text: str):
             buf = buf[step:]
     if len(buf) >= 2:
         yield np.frombuffer(buf[: len(buf) // 2 * 2], dtype=np.int16).astype(np.float32) / 32767.0
+
+
+VOICE_PROMPT_WAV = os.environ.get("VOXWEFT_VOICE_PROMPT_WAV", "")
+VOICE_PROMPT_ID = os.environ.get("VOXWEFT_VOICE_ID", "default")
+
+
+def _ensure_bridge_voice():
+    """Pin the TTS speaker on the bridge if the operator configured one.
+
+    Without a reference the model draws a fresh speaker per call, so two
+    segments of one utterance can come out in different voices; and the
+    bridge forgets any /add_prompt on restart. Re-check on every engine load
+    so a bridge restart under a long-lived server heals itself."""
+    if not VOICE_PROMPT_WAV:
+        log.warning("VOXWEFT_VOICE_PROMPT_WAV not set — zero-shot voice, timbre may "
+                    "vary between segments. Point it at a ~5 s wav to pin one.")
+        return
+    import requests
+    try:
+        have = [p.get("external_id") for p in
+                requests.get(f"{BRIDGE_URL}/available_prompts", timeout=10).json().get("prompts", [])]
+        if VOICE_PROMPT_ID in have:
+            return
+        wav_b64 = base64.b64encode(open(VOICE_PROMPT_WAV, "rb").read()).decode()
+        requests.post(f"{BRIDGE_URL}/add_prompt", timeout=120,
+                      json={"wav_base64": wav_b64, "external_id": VOICE_PROMPT_ID,
+                            "prompt_text": "", "denoise": False}).raise_for_status()
+        log.info("voice %r installed on bridge from %s", VOICE_PROMPT_ID, VOICE_PROMPT_WAV)
+    except Exception as e:
+        log.warning("voice registration failed (continuing zero-shot): %s", e)
 
 
 class _ASREngine:
@@ -245,6 +276,7 @@ async def _load_engines():
             tr = NLLBTranslator(nllb_dir, device=os.environ.get("VOXWEFT_NLLB_DEVICE", "mps"))
             await loop.run_in_executor(None, tr.load)
         _engines["translator"] = tr
+        await loop.run_in_executor(None, _ensure_bridge_voice)
         log.info("engines ready (bridge=%s)", BRIDGE_URL)
 
 
@@ -298,11 +330,13 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
         engines = {"asr": _ASREngine(), "qwen3asr": _ASREngine(),
                    "whisper": _ASREngine(), "tts": _TTSEngine(),
                    "translate": _engines["translator"], "filler": None}
+        llm_missing = False
         if state["mode"] == "agent":
             tr = _engines["translator"]
             if hasattr(tr, "chat_stream"):
                 engines["llm"] = InProcessChatLLM(tr)
             else:
+                llm_missing = True
                 slog.warning("agent mode needs an LLM translator; set VOXWEFT_LLM_DIR")
         orch = Orchestrator(
             mode=state["mode"], src_lang=state["src"], tgt_lang=state["tgt"],
@@ -313,6 +347,7 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
             voice_role="agent_default" if state["mode"] == "agent" else "interpreter",
             system_prompt=AGENT_SYSTEM_PROMPT)
         state["orch"] = orch
+        orch.llm_missing = llm_missing
         if old is not None:
             await old.aclose()
         slog.info("orchestrator: %s", orch.routes.describe())
@@ -377,8 +412,11 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
                 state["tgt"] = obj.get("tgt_lang") or state["tgt"]
                 state["hotwords"] = obj.get("hotwords") or []
                 orch = await _build_orch()
-                await send_json({"type": "session_config_ack", "success": True,
-                                 "mode": state["mode"], "routes": orch.routes.describe()})
+                ack = {"type": "session_config_ack", "success": not orch.llm_missing,
+                       "mode": state["mode"], "routes": orch.routes.describe()}
+                if orch.llm_missing:
+                    ack["error"] = "agent mode needs an LLM (set VOXWEFT_LLM_DIR)"
+                await send_json(ack)
 
             elif mt == "ptt_start":
                 # Pressing implies interrupt: the user is about to say the next
@@ -462,6 +500,9 @@ async def _text_turn(orch, text: str, send_json):
         if orch.mode == "agent":
             llm = orch.engines.get("llm")
             if llm is None:
+                await send_json({"type": "error", "stage": "llm", "seq": 0,
+                                 "message": "agent mode needs an LLM (set VOXWEFT_LLM_DIR)"})
+                await send_json({"type": "turn_end", "sentences": 0, "total_ms": 0})
                 return
             full, n = "", 0
             for s in llm.stream_sentences(text, system_prompt=orch.system_prompt,
@@ -469,9 +510,12 @@ async def _text_turn(orch, text: str, send_json):
                 full += s["sentence"]
                 n += 1
                 await send_json({"type": "llm_sentence", "text": s["sentence"],
-                                 "sentence_idx": n - 1})
-            orch._history.append({"role": "user", "content": text})
-            orch._history.append({"role": "assistant", "content": full})
+                                 "seq": 0, "sentence_idx": n - 1})
+                await orch._synth_and_send(0, s["sentence"], orch.routes.voice_role)
+            if full:
+                orch._history.append({"role": "user", "content": text})
+                orch._history.append({"role": "assistant", "content": full})
+                orch._history = orch._history[-orch._max_history:]
             await send_json({"type": "llm", "text": full, "sentences": n})
             await orch.send_json({"type": "turn_end", "sentences": n, "total_ms": 0})
         else:

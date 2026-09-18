@@ -1,6 +1,6 @@
 """IncrementalSegmenter 的单元测试 —— 不需要模型、不需要网络。
 
-    cd crossweft/m3 && python3 -m pytest test_segmenter.py -v
+    pytest tests/test_runtime_segmenter.py -v
     （或直接 python3 test_segmenter.py）
 
 用合成音频验证切分行为：静音间隔、短段丢弃、长句强切、flush 收尾。

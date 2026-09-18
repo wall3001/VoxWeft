@@ -24,6 +24,7 @@ final class Session: ObservableObject {
     // Transcript
     struct Turn: Identifiable {
         let id = UUID()
+        var seq: Int = 0          // server segment seq; 0 = text_input turn
         var src = ""
         var out = ""
         var firstAudioMs: Int?
@@ -42,7 +43,7 @@ final class Session: ObservableObject {
     private let ws = WebSocketManager()
     private let audio = AudioEngine()
     private var turnStart: Date?
-    private var pttStart: Date?
+    private var configDirty = false
     private var demoQueue: [String] = []
     private var demoTimer: Timer?
 
@@ -84,7 +85,12 @@ final class Session: ObservableObject {
     }
 
     private func pushConfig() {
-        guard connected, !recording else { return }
+        guard connected else { return }
+        // Never reconfigure mid-press: the server would rebuild the
+        // orchestrator under audio already in flight (DEVLOG §4.7).
+        // Remember and send on release instead of dropping the change.
+        guard !recording else { configDirty = true; return }
+        configDirty = false
         ws.sendJSON(["type": "session_config", "mode": mode,
                      "src_lang": srcLang, "tgt_lang": tgtLang])
     }
@@ -95,7 +101,6 @@ final class Session: ObservableObject {
         guard connected, !recording else { return }
         audio.stopPlayback()
         recording = true
-        pttStart = Date()
         ws.sendJSON(["type": "ptt_start"])
     }
 
@@ -105,6 +110,7 @@ final class Session: ObservableObject {
         ws.sendJSON(["type": "ptt_end"])
         // Latency clock starts at release: that is when the user is waiting.
         turnStart = Date()
+        if configDirty { pushConfig() }
     }
 
     func interrupt() {
@@ -146,21 +152,22 @@ final class Session: ObservableObject {
             routes = obj["routes"] as? String ?? ""
         case "segment_committed":
             if turnStart == nil { turnStart = Date() }
-            turns.append(Turn())
+            turns.append(Turn(seq: (obj["seq"] as? NSNumber)?.intValue ?? 0))
         case "asr":
-            if turns.isEmpty { turns.append(Turn()) }
-            turns[turns.count - 1].src = obj["text"] as? String ?? ""
-            turns[turns.count - 1].asrMs = (obj["latency_ms"] as? NSNumber)?.intValue
+            let i = turnIndex(for: obj)
+            turns[i].src = obj["text"] as? String ?? ""
+            turns[i].asrMs = (obj["latency_ms"] as? NSNumber)?.intValue
         case "translation", "llm":
-            if turns.isEmpty { turns.append(Turn()) }
-            turns[turns.count - 1].out = obj["text"] as? String ?? ""
-            turns[turns.count - 1].mtMs = (obj["latency_ms"] as? NSNumber)?.intValue
+            let i = turnIndex(for: obj)
+            turns[i].out = obj["text"] as? String ?? ""
+            turns[i].mtMs = (obj["latency_ms"] as? NSNumber)?.intValue
         case "llm_sentence":
-            if turns.isEmpty { turns.append(Turn()) }
-            turns[turns.count - 1].out += obj["text"] as? String ?? ""
+            let i = turnIndex(for: obj)
+            turns[i].out += obj["text"] as? String ?? ""
         case "audio_start":
-            if let t = turnStart, !turns.isEmpty, turns[turns.count - 1].firstAudioMs == nil {
-                turns[turns.count - 1].firstAudioMs = Int(Date().timeIntervalSince(t) * 1000)
+            let i = turnIndex(for: obj)
+            if let t = turnStart, turns[i].firstAudioMs == nil {
+                turns[i].firstAudioMs = Int(Date().timeIntervalSince(t) * 1000)
             }
         case "turn_end":
             if let t = turnStart, !turns.isEmpty {
@@ -184,6 +191,18 @@ final class Session: ObservableObject {
         default:
             break
         }
+    }
+
+    /// Events carry the server's segment `seq`; match on it. `seq` 0 (or
+    /// absent) is a text_input turn, which the client created itself — use
+    /// the last turn. Segments are committed synchronously while their ASR
+    /// arrives later, so "the last turn" is wrong as soon as two segments
+    /// are in flight.
+    private func turnIndex(for obj: [String: Any]) -> Int {
+        let seq = (obj["seq"] as? NSNumber)?.intValue ?? 0
+        if seq > 0, let i = turns.lastIndex(where: { $0.seq == seq }) { return i }
+        if turns.isEmpty { turns.append(Turn(seq: seq)) }
+        return turns.count - 1
     }
 
     private func handleAudio(_ data: Data) {

@@ -128,7 +128,7 @@ class HybridTranslator:
     def __init__(self, llm_model_dir: str, glossary_path: str,
                  use_llm_zh_to_lo: bool = True, max_tokens: int = 256):
         self._llm_dir = llm_model_dir
-        # 现场逃生开关（launchd: VOXWEFT_USE_LLM_ZH_TO_LO=1）。
+        # 现场逃生开关（launchd: VOXWEFT_USE_LLM_ZH_TO_SEA=1）。
         #
         # 打开后连老挝/高棉/缅甸也交给 LLM，即无视 _NLLB_LANGS 查表。
         # 留着它是因为展台上万一 NLLB 出问题（模型没加载、显存被挤），
@@ -180,7 +180,7 @@ class HybridTranslator:
         if self._nllb is None:
             import os as _os
             from voxweft.runtime.translator_nllb import NLLBTranslator
-            dev = _os.environ.get("VOXWEFT_NLLB_DEVICE", "cpu")
+            dev = _os.environ.get("VOXWEFT_NLLB_DEVICE", "mps")
             self._nllb = NLLBTranslator(
                 _os.environ.get("VOXWEFT_NLLB_DIR", _os.path.expanduser("~/.voxweft/models/nllb-200-1.3B")),
                 device=dev, num_beams=4, no_repeat_ngram=4)

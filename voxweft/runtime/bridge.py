@@ -29,7 +29,7 @@ BASE = Path(os.path.dirname(os.path.abspath(__file__)))
 MODEL_DIR = Path(os.environ.get("VOXWEFT_MODEL_DIR", os.environ.get("MODEL_DIR", str(Path.home() / ".voxweft/models"))))
 VoxCPM2_DIR = Path(os.environ.get("VOXCPM2_MODEL", str(MODEL_DIR / "VoxCPM2")))
 ASR_DIR = Path(os.environ.get("VOXWEFT_ASR_MODEL", str(MODEL_DIR / "Qwen3-ASR-1.7B")))
-WHISPER_DIR = MODEL_DIR / "whisper-large-v3-mlx"
+WHISPER_DIR = Path(os.environ.get("VOXWEFT_WHISPER_MODEL", str(MODEL_DIR / "whisper-large-v3-turbo")))
 
 app = FastAPI(title="voxweft bridge")
 
@@ -117,6 +117,45 @@ _tts_warmup_patches = int(os.environ.get("VOXWEFT_TTS_WARMUP_PATCHES", "0"))
 _tts_inference_steps = int(os.environ.get("VOXWEFT_TTS_STEPS", "6"))
 _tts_warmup_text = os.environ.get("VOXWEFT_TTS_WARMUP_TEXT",
                                   "欢迎使用语音合成服务，这是一次预热。")
+
+
+def _decode_audio_16k(payload: bytes) -> np.ndarray:
+    """WAV/FLAC/OGG bytes → float32 mono @16 kHz. Falls back to raw int16
+    @16 kHz only when the bytes are not a recognizable container."""
+    try:
+        audio, sr = sf.read(io.BytesIO(payload), dtype="float32")
+    except Exception:
+        return np.frombuffer(payload, dtype=np.int16).astype(np.float32) / 32768.0
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    if sr != 16000:
+        audio = resample_poly(audio, 16000, sr).astype(np.float32)
+    return np.ascontiguousarray(audio, dtype=np.float32)
+
+
+_asr_supported: set | None = None
+
+
+def _asr_language_hint(asr, code: str) -> str | None:
+    """Return `code` if the loaded model was trained with that label, else
+    None (auto language-ID). Forcing an unseen label onto stock Qwen3-ASR
+    (e.g. 'lao' on the open 1.7B, which has no Lao) decodes under an
+    out-of-distribution prefix and yields plausible-looking garbage; auto-LID
+    is the lesser evil. Set VOXWEFT_ASR_FORCE_LANG=1 to bypass (private
+    fine-tunes whose labels are not listed in config.support_languages)."""
+    global _asr_supported
+    if os.environ.get("VOXWEFT_ASR_FORCE_LANG", "0") == "1":
+        return code
+    if _asr_supported is None:
+        langs = getattr(getattr(asr, "config", None), "support_languages", None) or []
+        _asr_supported = {str(l).lower() for l in langs}
+        if not _asr_supported:
+            log.warning("ASR model lists no support_languages; passing labels through")
+    if not _asr_supported or code.lower() in _asr_supported:
+        return code
+    log.warning("ASR label %r not in model support_languages — using auto-LID "
+                "(set VOXWEFT_ASR_FORCE_LANG=1 to force)", code)
+    return None
 
 
 def _load_tts_sync():
@@ -216,8 +255,10 @@ class GenReq(BaseModel):
     voice_type: str | None = None
     external_id: str | None = None
     stream: bool = False
-    temperature: float = 1.0
-    cfg_value: float = 2.0
+    # Defaults follow the process env so a bare {"target_text"} behaves like
+    # the operator configured; an explicit value in the body wins.
+    temperature: float = _tts_temperature
+    cfg_value: float = _tts_cfg
     do_normalize: bool = True
 
 
@@ -244,8 +285,8 @@ async def generate(req: GenReq):
                 for chunk_f32, _ in tts.generate_streaming(
                         req.target_text,
                         ref_latents=_voice_ref_latents,
-                        temperature=_tts_temperature,
-                        cfg_value=_tts_cfg,
+                        temperature=req.temperature,
+                        cfg_value=req.cfg_value,
                         warmup_patches=_tts_warmup_patches):
                     i16 = (np.clip(chunk_f32, -1, 1) * 32767).astype(np.int16)
                     loop.call_soon_threadsafe(aq.put_nowait, i16.tobytes())
@@ -263,8 +304,12 @@ async def generate(req: GenReq):
                 if item is None:
                     break
                 if isinstance(item, Exception):
+                    # Status 200 is already on the wire. Raising here makes
+                    # Starlette drop the connection mid-body, which the client
+                    # sees as a transport error — the only signal we can still
+                    # send. Swallowing it would look like a clean short sentence.
                     log.error("TTS stream failed: %s", item)
-                    break
+                    raise item
                 yield item
 
         return StreamingResponse(_stream_pcm(), media_type="application/octet-stream")
@@ -272,8 +317,8 @@ async def generate(req: GenReq):
     def _full():
         return tts.generate(req.target_text,
                             ref_latents=_voice_ref_latents,
-                            temperature=_tts_temperature,
-                            cfg_value=_tts_cfg)
+                            temperature=req.temperature,
+                            cfg_value=req.cfg_value)
 
     wav, _ = await loop.run_in_executor(_tts_executor, _full)
     int16 = (np.clip(wav, -1, 1) * 32767).astype(np.int16)
@@ -394,7 +439,10 @@ async def chat_completions(req: Request):
         return JSONResponse({"error": "expected data URL"}, status_code=400)
     b64 = audio_url.split(",", 1)[1]
     wav_bytes = base64.b64decode(b64)
-    audio = np.frombuffer(wav_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+    # Decode as a container, not raw PCM: the runtime sends a RIFF WAV, and
+    # np.frombuffer on the whole payload turns the 44-byte header into 22
+    # near-full-scale samples — a click prepended to every ASR segment.
+    audio = _decode_audio_16k(wav_bytes)
 
     lang = body.get("language")
     hotwords = body.get("hotword") or []
@@ -440,7 +488,7 @@ async def chat_completions(req: Request):
         asr = await _get_asr()
         text = await loop.run_in_executor(
             _asr_executor,
-            lambda: asr.generate(audio, language=code, hotwords=hotwords))
+            lambda: asr.generate(audio, language=_asr_language_hint(asr, code), hotwords=hotwords))
     else:
         w = await _get_whisper()
         res = await loop.run_in_executor(
