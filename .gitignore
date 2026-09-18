@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+.DS_Store
+# model weights & audio outputs never enter the repo
+models/
+*.safetensors
+*.npz
+!tests/reference/**
+out.wav
+tts_out/
+bench/wav/
+bench/results/*.json
+bench/logs/
+bench/models/
+bench/relay/
+.pytest_cache/

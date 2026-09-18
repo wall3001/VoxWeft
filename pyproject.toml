@@ -1,0 +1,47 @@
+[project]
+name = "voxweft"
+version = "0.1.0"
+description = "On-device simultaneous interpretation & voice dialogue on Apple Silicon — VoxCPM2 on MLX at the core"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [{name = "OpenBMB / VoxWeft contributors"}]
+keywords = ["tts", "mlx", "apple-silicon", "simultaneous-interpretation", "voxcpm", "voice-clone", "speech-to-speech"]
+dependencies = [
+    "mlx>=0.30",
+    "numpy",
+    "transformers>=4.50",
+    "soundfile",
+    "scipy",
+]
+
+[project.optional-dependencies]
+# L2 runtime: bridge (TTS+ASR HTTP) + WebSocket server + MLX LLM/ASR adapters.
+runtime = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "requests",
+    "mlx-lm>=0.31",
+    "mlx-audio>=0.5",
+]
+# Optional endpointing model (measured net-negative for interpretation; see docs/DEVLOG.md).
+smartturn = ["pipecat-ai"]
+# NLLB fallback translator. CC-BY-NC-4.0 weights — research use only.
+nllb = ["torch", "sentencepiece"]
+mcp = ["mcp>=1.0"]
+bench = ["sacrebleu", "rapidfuzz", "sherpa-onnx"]
+dev = ["pytest"]
+
+[project.scripts]
+voxweft = "voxweft.cli:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["voxweft*"]
+
+[tool.setuptools.package-data]
+"voxweft.runtime" = ["glossary.json"]
