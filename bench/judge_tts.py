@@ -4,16 +4,17 @@ VoxCPM2 官方就是这么评 30 语可懂度的（他们用 Gemini ASR）。
 """
 import json, os, glob
 import numpy as np, soundfile as sf
-from bench_asr import cer, QWEN_LANG_OPEN as LANG
+from bench_asr import cer, load_asr
 
-from paths import RESULTS, TTS_OUT, model_path
-from mlx_audio.stt.utils import load_model
-m = load_model(model_path(os.environ.get("VOXWEFT_JUDGE_ASR", "qwen17")))
+from paths import RESULTS, TTS_OUT, model_kind, model_path
+# Same loader as the ASR bench, so the judge applies the same "only send a
+# language label the model lists" rule instead of forcing lo/km/my.
+_judge = os.environ.get("VOXWEFT_JUDGE_ASR", "qwen17")
+_run = load_asr(model_kind(_judge), model_path(_judge))
 
 def asr(wav, lang):
     a, sr = sf.read(wav, dtype="float32")
-    r = m.generate(a, language=LANG[lang]); t = str(getattr(r, "text", r))
-    _, sep, tail = t.partition("<asr_text>"); return (tail if sep else t).strip()
+    return _run(a, lang)
 
 out = []
 for f in sorted(glob.glob(f"{RESULTS}/tts_*.json")):

@@ -104,28 +104,14 @@ zero the CFM has no stochasticity to work with and does not converge.
 **Fix.** Leave it at the official `1.0`. Documented in `TTS-FINDINGS.md` §2.
 This knob *looks* like it treats jitter; it only makes things worse.
 
-### 2.2 Voice-style captions are read aloud as speech
+### 2.2 There is no style-prefix syntax — everything in the text is spoken
 
-**Symptom.** Every utterance began with "一位沉稳清晰的播音员" ("a calm, clear
-announcer") spoken out loud.
-
-**Root cause.** We were prepending a parenthesised style caption to the text
-on the assumption that VoxCPM2 would treat it as a control prefix. It does
-not — it is text, so it is synthesized. A code comment claimed otherwise;
-the comment was wrong.
-
-**How we proved it.** ASR round-trip: synthesize with and without the
-prefix, transcribe both. With prefix: 4.80 s of audio, transcript contains
-"播音员". Without: 2.56 s. Not "sounds a bit longer" — measured.
-
-**Fix.** `apply_voice()` is now the identity and `voice_caption()` returns
-`""`. Unit tests pin this (`test_voice_caption_is_empty`,
-`test_apply_voice_is_identity` in `tests/test_runtime_router.py`); the ASR
-round-trip itself is `scripts/probe_caption_leak.py`. Voice control goes
-through reference-audio cloning only.
-
-**Cost.** Also a lesson about trusting comments: the one that said "this is
-not read aloud" was written by the person who introduced the bug.
+An early build prepended a parenthesised voice description to the text,
+assuming the model would read it as a control token. It does not: VoxCPM2
+synthesizes whatever it is given, and the audience heard the description
+before every sentence. Proved by ASR round-trip (with prefix 4.80 s and the
+description in the transcript; without, 2.56 s), not by ear. Voice selection
+is by reference audio only; the runtime never alters synthesis text.
 
 ### ⚠️ 2.3 The "first-frame pop" — what it was and what it wasn't
 
@@ -381,13 +367,14 @@ the prompt biases short-sentence decoding.
 
 ## 6. ASR
 
-### 6.1 Language label case decides the *script* you get back
+### 6.1 Only send a language label the loaded model lists
 
-Qwen3-ASR fine-tuned with lowercase training labels: `lao` → Lao script;
-`Lao`, `lo`, `lao_Laoo` → **Thai script**, silently. Normalize every
-incoming form to the training label before it reaches the model
-(`router.normalize`, `test_normalize_all_lao_forms` is the most important
-test in the runtime suite).
+mlx-audio passes an unknown `language=` name straight into Qwen3-ASR's
+decoder prefix (`language Lao<asr_text>`). A label the model was never
+trained on yields plausible output in the wrong script, silently. The
+bridge checks `config.support_languages` and falls back to auto-LID for
+anything not listed; the router sends Lao/Khmer/Burmese to Whisper-large-v3,
+which has them, instead of to stock Qwen3-ASR, which does not.
 
 ### 6.2 Auto language-ID on short clips is unreliable between Lao and Thai
 
@@ -517,6 +504,14 @@ real-time with margin. See `docs/HARDWARE.md`.
 
 ## Open — measured but not yet explained
 
+* **Open ASR for Lao / Khmer / Burmese is not there yet.** Stock Qwen3-ASR
+  does not list them; Whisper-large-v3-turbo has them on paper but on our
+  clips returns Thai script for Lao and repetition loops for Khmer (bench:
+  lo CER 89%). Meta's Omnilingual-ASR CTC-1B (Apache-2.0, sherpa-onnx,
+  CPU) measured lo CER ~11% and is the honest open choice; an adapter for it
+  is the next runtime backend to write. Until then the router sends these
+  languages to Whisper because it is the only thing that will not silently
+  decode them under a wrong label.
 * **Loudness variance between runs** (same text/params: whole-signal RMS
   0.006–0.11, peaks up to 0.97). Known model behaviour without a seed
   (`TTS-FINDINGS.md` §3); a peak of 0.97 is one bad run from clipping.

@@ -163,25 +163,27 @@ def test_interpreter_two_segments():
 
 
 def test_interpreter_uses_router_lang():
-    """ASR 拿到的必须是路由后的语言串（小写训练标签）。"""
+    """ASR 拿到的必须是路由后的语言串（后端期望的形式）。"""
     asr = FakeASR()
     eng = {"asr": asr, "translate": FakeTranslator(), "tts": FakeTTS()}
-    orch, h, loop = make(eng)
+    h = Harness()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    orch = Orchestrator(
+        mode="interpreter", src_lang="vi", tgt_lang="zh",
+        send_json=h.send_json, send_bytes=h.send_bytes,
+        engines=eng, use_smart_turn=False)
     drive(orch, h, loop, tone(40) + silence(20))
     assert asr.calls, "ASR never called"
-    assert asr.calls[0]["lang"] == "lao", f"got {asr.calls[0]['lang']!r}"
+    assert asr.calls[0]["lang"] == "Vietnamese", f"got {asr.calls[0]['lang']!r}"
     print("✓ test_interpreter_uses_router_lang")
 
 
 def test_interpreter_speaks_translation_verbatim():
     """送进 TTS 的必须是译文**原样**，一个字都不多。
 
-    这条以前叫 test_interpreter_voice_caption_applied，断言 TTS 文本以 "(" 开头
-    ——那是早期给音色加前缀的写法。`apply_voice` 后来改成恒等变换了（见
-    router.py），断言没跟着改，于是这条测试一直红着。
-
-    改成验相反的一面：**不能**有任何前缀混进去。TTS 是哑巴 render，给什么
-    念什么——真漏一个音色标记进去，机器会当着观众的面把它念出来。
+    TTS 是哑巴 render，给什么念什么——任何控制标记混进文本都会被当着听众
+    念出来（DEVLOG §2.2）。所以 runtime 不允许改动合成文本。
     """
     tts = FakeTTS()
     eng = {"asr": FakeASR(), "translate": FakeTranslator(), "tts": tts}
@@ -337,22 +339,22 @@ def test_sea_to_sea_direct():
     print("✓ test_sea_to_sea_direct")
 
 
-def test_whisper_route_for_indonesian():
-    """印尼语走 Whisper，不是 80K。"""
+def test_whisper_route_for_lao():
+    """老挝语走 Whisper：开源 Qwen3-ASR 不带 lo/km/my。"""
     h = Harness()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    wh = FakeASR("Selamat")
+    wh = FakeASR("ສະບາຍດີ")
     eng = {"asr": FakeASR(), "whisper": wh, "translate": FakeTranslator(),
            "tts": FakeTTS()}
     orch = Orchestrator(
-        mode="interpreter", src_lang="id", tgt_lang="zh",
+        mode="interpreter", src_lang="lo", tgt_lang="zh",
         send_json=h.send_json, send_bytes=h.send_bytes,
         engines=eng, use_smart_turn=False)
     drive(orch, h, loop, tone(40) + silence(20))
-    assert wh.calls, "Whisper should have been called for Indonesian"
-    assert wh.calls[0]["lang"] == "id", wh.calls[0]
-    print("✓ test_whisper_route_for_indonesian")
+    assert wh.calls, "Whisper should have been called for Lao"
+    assert wh.calls[0]["lang"] == "lo", wh.calls[0]
+    print("✓ test_whisper_route_for_lao")
 
 
 if __name__ == "__main__":

@@ -433,7 +433,7 @@ class Orchestrator:
         else:
             eng = self.engines.get("whisper")
             if eng is None:
-                log.warning("whisper 未加载，回退 SEA-finetuned Qwen3-ASR（语言可能不准）")
+                log.warning("whisper 未加载，回退 Qwen3-ASR 自动语言识别")
                 eng = self.engines.get("qwen3asr") or self.engines["asr"]
         return eng.transcribe(audio, language=route.lang, hotwords=route.hotwords)
 
@@ -449,7 +449,7 @@ class Orchestrator:
     async def _synth_locked(self, seq: int, text: str, voice_role: str) -> None:
         tts = self.engines["tts"]
         aq: asyncio.Queue = asyncio.Queue()
-        spoken = LR.apply_voice(text, voice_role)
+        spoken = text or ""
 
         def _producer():
             t0 = time.perf_counter()

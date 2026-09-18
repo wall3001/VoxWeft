@@ -1,7 +1,6 @@
 """ASR 开源替代评测（Apple Silicon，MLX + sherpa-onnx）。
 
 用法:
-    python bench_asr.py --model sea-private        # 私有基线（不随仓库分发）
     python bench_asr.py --model qwen17             # Qwen3-ASR-1.7B 开源
     python bench_asr.py --model qwen06             # Qwen3-ASR-0.6B 开源
     python bench_asr.py --model whisper-turbo
@@ -25,15 +24,15 @@ from paths import (BENCH, RESULTS, ensure_dirs, manifest, model_kind, model_path
                    wav_path)
 
 SR = 16000
-ASR_MODELS = ["sea-private", "qwen17", "qwen06", "qwen06-km", "whisper-turbo",
+ASR_MODELS = ["qwen17", "qwen06", "qwen06-km", "whisper-turbo",
               "whisper-v3", "omni-1b", "omni-300m"]
-# Qwen3-ASR 的语言标签。SEA fine-tune 用的是小写训练标签；
-# 开源版用英文语言名。两套都试：先按模型类型给默认，跑不通再换。
-QWEN_LANG_SEA  = {"vi": "vietnamese", "km": "khmer", "lo": "lao", "th": "thai", "zh": "chinese",
-                  "en": "english", "my": "burmese", "id": "indonesian", "ms": "malay",
-                  "ja": "japanese", "ko": "korean", "de": "german", "fr": "french", "es": "spanish"}
-QWEN_LANG_OPEN = {k: v.capitalize() for k, v in QWEN_LANG_SEA.items()}
-WHISPER_LANG   = {k: k for k in QWEN_LANG_SEA}
+# Qwen3-ASR takes language names (matched case-insensitively against the
+# model's config.support_languages); unknown names are passed through into
+# the decoder prefix, so only send ones the loaded model lists.
+QWEN_LANG = {"vi": "Vietnamese", "km": "Khmer", "lo": "Lao", "th": "Thai", "zh": "Chinese",
+             "en": "English", "my": "Burmese", "id": "Indonesian", "ms": "Malay",
+             "ja": "Japanese", "ko": "Korean", "de": "German", "fr": "French", "es": "Spanish"}
+WHISPER_LANG = {k: k for k in QWEN_LANG}
 
 _ZW = dict.fromkeys(map(ord, "​‌‍﻿⁠"), None)
 
@@ -89,12 +88,11 @@ def load_asr(kind: str, path: str):
         from mlx_audio.stt.utils import load_model
         m = load_model(path)
         supported = {s.lower() for s in (getattr(m.config, "support_languages", None) or [])}
-        def run(seg, lang, is_sea):
-            table = QWEN_LANG_SEA if is_sea else QWEN_LANG_OPEN
-            name = table[lang]
-            # 开源版不认 lo/km/my：硬塞一个没见过的标签是 OOD，退回自动检测
-            # （模型自己吐 "language X<asr_text>..."，我们只取正文）。
-            hint = name if (is_sea or name.lower() in supported) else None
+        def run(seg, lang):
+            name = QWEN_LANG[lang]
+            # A label the model does not list is out-of-distribution for the
+            # decoder prefix; fall back to auto-LID and take the body only.
+            hint = name if name.lower() in supported else None
             r = m.generate(seg, language=hint)
             t = getattr(r, "text", r)
             t = str(t)
@@ -106,7 +104,7 @@ def load_asr(kind: str, path: str):
         d = path
         rec = sherpa_onnx.OfflineRecognizer.from_omnilingual_asr_ctc(
             model=f"{d}/model.int8.onnx", tokens=f"{d}/tokens.txt", num_threads=6)
-        def run(seg, lang, is_sea):
+        def run(seg, lang):
             st = rec.create_stream()
             st.accept_waveform(sample_rate=SR, waveform=np.ascontiguousarray(seg))
             rec.decode_stream(st)
@@ -114,7 +112,7 @@ def load_asr(kind: str, path: str):
         return run
     else:
         import mlx_whisper
-        def run(seg, lang, is_sea):
+        def run(seg, lang):
             r = mlx_whisper.transcribe(seg, path_or_hf_repo=path, language=WHISPER_LANG[lang],
                                        task="transcribe", fp16=True, condition_on_previous_text=False,
                                        temperature=0.0, no_speech_threshold=0.6)
@@ -135,7 +133,6 @@ def main():
     ap.add_argument("--min-sil", type=float, default=0.45); ap.add_argument("--max-utt", type=float, default=6.0)
     a = ap.parse_args()
     kind, path = model_kind(a.model), model_path(a.model)
-    is_sea = a.model == "sea-private"
     langs = a.langs.split(",")
 
     mani = manifest()
@@ -150,7 +147,7 @@ def main():
     t0 = time.perf_counter(); run = load_asr(kind, path)
     print(f"   load {time.perf_counter()-t0:.1f}s", flush=True)
     # 预热
-    run(np.zeros(SR * 2, dtype=np.float32) + 1e-4, langs[0], is_sea)
+    run(np.zeros(SR * 2, dtype=np.float32) + 1e-4, langs[0])
 
     results = []; per_lang = {}
     for it in items:
@@ -162,7 +159,7 @@ def main():
         for s in segs:
             t1 = time.perf_counter()
             try:
-                h = run(s, it["lang"], is_sea)
+                h = run(s, it["lang"])
             except Exception as e:
                 h = ""; print(f"   ! {it['id']} chunk fail: {type(e).__name__}: {e}", flush=True)
             wall += time.perf_counter() - t1

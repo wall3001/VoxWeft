@@ -1,16 +1,18 @@
-"""LanguageRouter — 按「任务 + 语言对」选后端。纯函数，无状态，不碰 I/O。
+"""LanguageRouter — pick a backend per (task, language pair). Pure functions.
 
-为什么需要它：展厅演示要覆盖东盟十国，但没有任何单一模型覆盖全部语种。
-ASR 有三条路径（自研 SEA-finetuned Qwen3-ASR / Whisper 兜底 / 中文本地），翻译有三条
-（Qwen3-LLM / NLLB / 护栏回退），TTS 一条但音色要分角色。这些选择散落在
-ws_server 的 if-else 里会失控——集中到这里，加语言只改一张表。
+Why it exists: no single open model covers every language we care about.
+ASR has two paths (Qwen3-ASR for the languages it ships with, Whisper for the
+rest), translation has two (an MLX chat LLM, a dedicated MT model), TTS has
+one. Keeping the choices in one table beats if-else scattered over the
+server; adding a language is one row.
 
-设计约束（都是实测踩出来的，见 m3/ROUTING.md §1）：
-  * mlx ASR 只认小写训练标签。传 'lo'/'Lao'/'lao_Laoo' 会静默退化成泰文，
-    不报错。所以 normalize 是安全边界，不是顺手做的格式化。
-  * zh→lo 方向小 LLM 会蒙错语言（出高棉文/泰文混排），必须 NLLB。
-    方向门控在这里表达，不散到调用点。
-  * SEA↔SEA 不经中文中转——两跳错误累积且延迟翻倍。
+Constraints, all measured:
+  * Language codes arrive in every shape (lo / Lao / lao_Laoo / 老挝语).
+    `normalize()` maps them to FLORES-200 before anything else looks at them.
+  * zh→low-resource with a small chat LLM guesses the wrong language
+    (Khmer/Thai script mixed into Lao). Route those through dedicated MT.
+  * SEA↔SEA is direct, never via Chinese — two hops double latency and
+    compound errors.
 """
 from __future__ import annotations
 
@@ -54,15 +56,18 @@ LANG_DISPLAY = {
     VIE: "越南语", ENG: "英语", IND: "印尼语", MSA: "马来语",
 }
 
-# FLORES-200 → mlx SEA-SFT 训练标签（小写）
-FLORES_TO_MLX = {
-    ZH: "chinese", LAO: "lao", THA: "thai", KHM: "khmer",
-    MYA: "burmese", VIE: "vietnamese", ENG: "english",
-    IND: "indonesian", MSA: "malay",
+# FLORES-200 → language name as Qwen3-ASR's `language=` expects (matched
+# case-insensitively against config.support_languages by mlx-audio).
+FLORES_TO_NAME = {
+    ZH: "Chinese", LAO: "Lao", THA: "Thai", KHM: "Khmer",
+    MYA: "Burmese", VIE: "Vietnamese", ENG: "English",
+    IND: "Indonesian", MSA: "Malay",
 }
 
-# SEA-finetuned Qwen3-ASR 微调覆盖的语种（其余走 Whisper）
-ASR_80K_LANGS = {LAO, THA, KHM, MYA, VIE, ZH}
+# Languages stock Qwen3-ASR (0.6B/1.7B) ships with, among the ones we route.
+# Lao / Khmer / Burmese are not in its 30 — those go to Whisper-large-v3,
+# which does have them. A fine-tune that adds them can extend this set.
+QWEN3_ASR_LANGS = {ZH, VIE, THA, ENG, IND, MSA}
 
 # SEA 语系（不含中文）—— 用于判断是否走 NLLB 直译
 SEA_LANGS = {LAO, THA, KHM, MYA, VIE, IND, MSA}
@@ -109,24 +114,25 @@ class ASRRoute:
 
 def route_asr(src_lang: str, hotwords: list[str] | None = None,
               default_hotwords: dict | None = None) -> ASRRoute:
-    """按源语言选 ASR 后端。
+    """Pick the ASR backend by source language.
 
-    SEA-finetuned Qwen3-ASR 是我们自研的权重，低资源语系（老/泰/高棉/缅/越）是它的强项——
-    这些语言在其他任何开源 ASR 上都是无人区。它没微调过的（印尼/马来/英）
-    走 Whisper-Large-v3。
+    Qwen3-ASR for what it ships with (zh/vi/th/en/id/ms …), Whisper-large-v3
+    for the low-resource SEA languages it lacks (lo/km/my). The `lang` field
+    is what the backend's `language=` argument expects: a language name for
+    Qwen3-ASR, an ISO-639-1 code for Whisper.
     """
     code = normalize(src_lang)
     hw = list(hotwords or [])
     if not hw and default_hotwords:
         hw = list(default_hotwords.get(code, []))
 
-    if code in ASR_80K_LANGS:
-        return ASRRoute("qwen3asr", FLORES_TO_MLX.get(code, "lao"), hw)
-    return ASRRoute("whisper", _whisper_lang(code), hw)
+    if code in QWEN3_ASR_LANGS:
+        return ASRRoute("qwen3asr", FLORES_TO_NAME[code], hw)
+    return ASRRoute("whisper", whisper_lang(code), hw)
 
 
-def _whisper_lang(code: str) -> str:
-    """Whisper 认 ISO-639-1 两字母码，不是 FLORES。"""
+def whisper_lang(code: str) -> str:
+    """Whisper takes ISO-639-1 two-letter codes, not FLORES."""
     return {
         ENG: "en", IND: "id", MSA: "ms", VIE: "vi",
         THA: "th", LAO: "lo", KHM: "km", MYA: "my", ZH: "zh",
@@ -213,42 +219,12 @@ def route_translate(src_lang: str, tgt_lang: str,
 
 # ── TTS 路由 ────────────────────────────────────────────────────────────────
 #
-# ⚠️ 不要给合成文本加音色描述前缀。
-#
-# 曾经这样做过：给 TTS 文本拼上 `(一位沉稳清晰的播音员)`，本意是当隐式音色
-# 条件。当时的注释写「caption 字未被读出」——**那是错的**。实测（ASR 回环）：
-#
-#   不带前缀  2.56s  →  「欢迎参加东盟数字经济会议。」
-#   带前缀    4.80s  →  「阿千一位沉稳清晰的播音员，欢迎参加东盟数字经济会议。」
-#
-# 即 VoxCPM2 会把括号里的描述当正文念出来。展厅里听众会先听到一句莫名其妙的
-# 「一位沉稳清晰的播音员」，非常尴尬。
-#
-# 现在统一不加前缀。若将来需要区分音色，正确做法是给 VoxCPM2 换 reference
-# 音频（音色克隆），而不是在文本里加描述。
-
-# 角色名保留 —— 接口上仍然传 role，但当前不做音色区分。
-# 保留它是为了未来接音色克隆时有个现成的挂载点。
+# One TTS backend. Voice selection is by reference audio (cloning) on the
+# bridge, never by text: VoxCPM2 has no style-prefix syntax — anything in the
+# text is spoken. `voice_role` is carried through the session so a host can
+# map roles to reference voices; the runtime itself does not alter text.
 VOICE_ROLES = ("interpreter", "agent_default", "agent_warm")
 DEFAULT_VOICE = "interpreter"
-
-
-def voice_caption(role: str | None) -> str:
-    """历史接口。**永远返回空串** —— 见上面关于前缀会被念出的说明。
-
-    保留这个函数而不是删掉，是为了让调用点不必改动；如果将来要做音色克隆，
-    在这里换成「解析出 reference latents」即可。
-    """
-    return ""
-
-
-def apply_voice(text: str, role: str | None = None) -> str:
-    """给合成文本套上音色条件。
-
-    当前是**恒等变换**（不加任何前缀）——见文件上方说明。保留函数是为了
-    未来接音色克隆：那时改这里，调用点不用动。
-    """
-    return text or ""
 
 
 # ── 一站式：给一次会话/一轮对话算出全部路由 ─────────────────────────────────

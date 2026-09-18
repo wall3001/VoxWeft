@@ -2,9 +2,9 @@
 
     pytest tests/test_runtime_router.py
 
-重点验证三个实测踩过的坑不回归：
-  1. 各种老挝语写法都必须归一成同一件事（不归一会静默退化成泰文）
-  2. zh→lo 必须走 NLLB（小 LLM 会蒙错语言）
+重点验证三件事不回归：
+  1. 各种语言写法都归一到 FLORES-200（下游只认这一种）
+  2. zh→lo 必须走专用 MT（小 LLM 会蒙错语言）
   3. SEA↔SEA 必须直译，不经中文中转
 """
 import os
@@ -15,7 +15,7 @@ from voxweft.runtime import router as LR
 
 
 def test_normalize_all_lao_forms():
-    """这是最重要的一个测试。任何一条漏网都会让老挝语静默变泰文。"""
+    """归一化是安全边界：下游按 FLORES 码查表，漏一种写法就查不到。"""
     for form in ["lo", "Lao", "LAO", "lao_Laoo", "laos", "laotian", "LAO_LAOO",
                  "老挝语", "老挝"]:
         got = LR.normalize(form)
@@ -48,42 +48,39 @@ def test_normalize_unknown_passes_through():
 
 # ── ASR 路由 ────────────────────────────────────────────────────────────────
 
-def test_asr_qwen3asr_for_finetuned_langs():
-    for code in ["lao_Laoo", "tha_Thai", "khm_Khmr", "mya_Mymr",
-                 "vie_Latn", "zho_Hans"]:
+def test_asr_qwen3asr_for_shipped_langs():
+    for code in ["zho_Hans", "vie_Latn", "tha_Thai", "eng_Latn", "ind_Latn", "zsm_Latn"]:
         r = LR.route_asr(code)
-        assert r.backend == "qwen3asr", f"{code} should hit SEA-finetuned Qwen3-ASR, got {r.backend}"
-    print("✓ test_asr_qwen3asr_for_finetuned_langs")
+        assert r.backend == "qwen3asr", f"{code} should hit Qwen3-ASR, got {r.backend}"
+    print("✓ test_asr_qwen3asr_for_shipped_langs")
 
 
-def test_asr_whisper_for_others():
-    for code in ["ind_Latn", "zsm_Latn", "eng_Latn"]:
+def test_asr_whisper_for_low_resource_sea():
+    """Stock Qwen3-ASR has no Lao/Khmer/Burmese; Whisper-large-v3 does."""
+    for code in ["lao_Laoo", "khm_Khmr", "mya_Mymr"]:
         r = LR.route_asr(code)
         assert r.backend == "whisper", f"{code} should hit Whisper, got {r.backend}"
-    print("✓ test_asr_whisper_for_others")
+    print("✓ test_asr_whisper_for_low_resource_sea")
 
 
-def test_asr_lang_string_is_mlx_label():
-    """喂给 mlx 的必须是训练标签（小写），不是 FLORES 码。"""
-    assert LR.route_asr("lao_Laoo").lang == "lao"
-    assert LR.route_asr("khm_Khmr").lang == "khmer"
-    assert LR.route_asr("zho_Hans").lang == "chinese"
-    print("✓ test_asr_lang_string_is_mlx_label")
+def test_asr_lang_string_is_language_name():
+    """Qwen3-ASR takes a language name; matched case-insensitively downstream."""
+    assert LR.route_asr("vie_Latn").lang == "Vietnamese"
+    assert LR.route_asr("zho_Hans").lang == "Chinese"
+    print("✓ test_asr_lang_string_is_language_name")
 
 
 def test_asr_whisper_lang_is_iso():
-    """Whisper 认两字母 ISO 码。"""
-    assert LR.route_asr("ind_Latn").lang == "id"
-    assert LR.route_asr("eng_Latn").lang == "en"
+    assert LR.route_asr("lao_Laoo").lang == "lo"
+    assert LR.route_asr("khm_Khmr").lang == "km"
     print("✓ test_asr_whisper_lang_is_iso")
 
 
 def test_asr_hotword_defaults():
-    defaults = {"lao_Laoo": ["ວຽງຈັນ"]}
-    r = LR.route_asr("lao_Laoo", default_hotwords=defaults)
-    assert r.hotwords == ["ວຽງຈັນ"], f"got {r.hotwords}"
-    # 客户端传了就用客户端的
-    r2 = LR.route_asr("lao_Laoo", hotwords=["自定义"], default_hotwords=defaults)
+    defaults = {"vie_Latn": ["Hà Nội"]}
+    r = LR.route_asr("vie_Latn", default_hotwords=defaults)
+    assert r.hotwords == ["Hà Nội"], f"got {r.hotwords}"
+    r2 = LR.route_asr("vie_Latn", hotwords=["自定义"], default_hotwords=defaults)
     assert r2.hotwords == ["自定义"], f"got {r2.hotwords}"
     print("✓ test_asr_hotword_defaults")
 
@@ -126,37 +123,13 @@ def test_llm_disabled_falls_to_nllb():
     print("✓ test_llm_disabled_falls_to_nllb")
 
 
-# ── TTS 音色 ────────────────────────────────────────────────────────────────
-
-def test_voice_caption_is_empty():
-    """音色前缀必须为空 —— 实测结论，不是设计选择。
-
-    VoxCPM2 会把 `(一位沉稳清晰的播音员)` 当正文念出来（ASR 回环验证：
-    2.56s → 4.80s，识别结果里出现「播音员」）。所以任何角色都不能加前缀。
-    """
-    for role in ("interpreter", "agent_default", "agent_warm", None, "unknown"):
-        got = LR.voice_caption(role)
-        assert got == "", f"voice_caption({role!r}) 应返回空串，实际 {got!r}"
-    print("\u2713 test_voice_caption_is_empty")
-
-
-def test_apply_voice_is_identity():
-    """apply_voice 不得改动文本（否则前缀会被念出来）。"""
-    for text in ("欢迎参加东盟数字经济会议。", "ສະບາຍດີ", "a"):
-        got = LR.apply_voice(text, "interpreter")
-        assert got == text, f"apply_voice 改动了文本: {text!r} → {got!r}"
-    assert LR.apply_voice("", "interpreter") == ""
-    print("\u2713 test_apply_voice_is_identity")
-
-
-
 # ── 会话级 ──────────────────────────────────────────────────────────────────
 
 def test_session_routes_describe():
     sr = LR.SessionRoutes("lo", "zh", mode="interpreter")
     d = sr.describe()
     assert "老挝语→中文" in d, d
-    assert "ASR=qwen3asr" in d, d
+    assert "ASR=whisper" in d, d
     assert "MT=llm" in d, d
     print("✓ test_session_routes_describe")
 

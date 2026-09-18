@@ -30,6 +30,7 @@ runtime = [
     "requests",
     "mlx-lm>=0.31",
     "mlx-audio>=0.5",
+    "mlx-whisper",
 ]
 # Optional endpointing model (measured net-negative for interpretation; see docs/DEVLOG.md).
 smartturn = ["pipecat-ai"]

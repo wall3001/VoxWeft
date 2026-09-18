@@ -60,8 +60,10 @@ in-flight turn to cancel.
 | SEA ↔ SEA | dedicated MT, direct | two hops double latency and compound errors |
 | anything else | LLM | |
 
-ASR backend by language: SEA-finetuned Qwen3-ASR for {lo, th, km, my, vi, zh}
-(pass the **lowercase training label**), Whisper-MLX for the rest.
+ASR backend by language: Qwen3-ASR for what it ships with (zh/vi/th/en/id/ms …,
+language name), Whisper-large-v3 MLX for Lao/Khmer/Burmese (ISO code). The
+bridge additionally checks the loaded model's `support_languages` and falls
+back to auto-LID for anything unlisted.
 
 ## Modes
 

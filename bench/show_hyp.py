@@ -1,7 +1,7 @@
 import json, sys, os
 from paths import RESULTS as R, MANIFEST
 ids = sys.argv[1].split(",") if len(sys.argv) > 1 else ["vi_01"]
-tags = sys.argv[2].split(",") if len(sys.argv) > 2 else ["sea-private", "sea-private-prod", "qwen17", "qwen17-prod"]
+tags = sys.argv[2].split(",") if len(sys.argv) > 2 else ["qwen17", "qwen17-prod", "whisper-turbo", "omni-1b"]
 mani = {x["id"]: x for x in json.load(open(MANIFEST))}
 for i in ids:
     print(f"[REF          ] {i}: {mani[i]['ref'][:260]}")

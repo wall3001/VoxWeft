@@ -136,25 +136,19 @@ def _decode_audio_16k(payload: bytes) -> np.ndarray:
 _asr_supported: set | None = None
 
 
-def _asr_language_hint(asr, code: str) -> str | None:
-    """Return `code` if the loaded model was trained with that label, else
-    None (auto language-ID). Forcing an unseen label onto stock Qwen3-ASR
-    (e.g. 'lao' on the open 1.7B, which has no Lao) decodes under an
-    out-of-distribution prefix and yields plausible-looking garbage; auto-LID
-    is the lesser evil. Set VOXWEFT_ASR_FORCE_LANG=1 to bypass (private
-    fine-tunes whose labels are not listed in config.support_languages)."""
+def _asr_language_hint(asr, name: str | None) -> str | None:
+    """Return `name` if the loaded Qwen3-ASR lists it in config.support_languages,
+    else None (auto language-ID). mlx-audio passes unknown names through into
+    the decoder prefix verbatim, and a label the model never saw yields
+    plausible-looking output in the wrong script."""
     global _asr_supported
-    if os.environ.get("VOXWEFT_ASR_FORCE_LANG", "0") == "1":
-        return code
+    if not name:
+        return None
     if _asr_supported is None:
         langs = getattr(getattr(asr, "config", None), "support_languages", None) or []
         _asr_supported = {str(l).lower() for l in langs}
-        if not _asr_supported:
-            log.warning("ASR model lists no support_languages; passing labels through")
-    if not _asr_supported or code.lower() in _asr_supported:
-        return code
-    log.warning("ASR label %r not in model support_languages — using auto-LID "
-                "(set VOXWEFT_ASR_FORCE_LANG=1 to force)", code)
+    if not _asr_supported or name.lower() in _asr_supported:
+        return name
     return None
 
 
@@ -389,16 +383,32 @@ async def _get_asr():
     return await loop.run_in_executor(_asr_executor, _ensure_asr_locked)
 
 
-# Whisper-Large-v3 fallback for languages the SEA-SFT 80K wasn't fine-tuned on
-# (Indonesian, Malay, Tagalog, English). mlx-community/whisper-large-v3-mlx.
-#
-# 路由分界线就是下面这个集合：落在里面的走自研 SEA-finetuned Qwen3-ASR，其余走 Whisper。
-_ASR_80K_LANGS = {
-    "lao", "khmer", "burmese", "thai", "vietnamese", "chinese",
-}
-
+# Whisper-large-v3 (MLX) for languages the loaded Qwen3-ASR does not list —
+# stock Qwen3-ASR has no Lao / Khmer / Burmese; Whisper does.
 _whisper = None
 _whisper_lock = threading.Lock()
+
+
+class _Whisper:
+    """Thin wrapper over mlx_whisper so the call shape matches Qwen3-ASR's.
+
+    Why mlx_whisper and not mlx_audio's whisper: the latter needs the
+    HuggingFace processor/tokenizer files next to the weights, which the
+    ModelScope mirrors of mlx-community/whisper-* do not ship; mlx_whisper
+    only needs config.json + weights.safetensors and is what bench/ validated.
+    """
+
+    def __init__(self, path: str):
+        import mlx_whisper  # noqa: F401  (import here: optional dependency)
+        self._path = path
+
+    def generate(self, audio: np.ndarray, language: str | None = None):
+        import mlx_whisper
+        r = mlx_whisper.transcribe(
+            audio, path_or_hf_repo=self._path, language=language, task="transcribe",
+            fp16=True, condition_on_previous_text=False, temperature=0.0,
+            no_speech_threshold=0.6)
+        return (r.get("text") or "").strip()
 
 
 def _load_whisper_sync():
@@ -406,8 +416,8 @@ def _load_whisper_sync():
     global _whisper
     if not (WHISPER_DIR / "config.json").exists():
         raise RuntimeError("whisper not downloaded: %s" % WHISPER_DIR)
-    log.info("loading Whisper-Large-v3 from %s", WHISPER_DIR)
-    _whisper = load_asr_model(str(WHISPER_DIR))
+    log.info("loading Whisper (mlx_whisper) from %s", WHISPER_DIR)
+    _whisper = _Whisper(str(WHISPER_DIR))
     return _whisper
 
 
@@ -447,54 +457,34 @@ async def chat_completions(req: Request):
     lang = body.get("language")
     hotwords = body.get("hotword") or []
     asr = await _get_asr()
-    # No auto-LID: on short clips Qwen3-ASR's LID picks Thai for Lao and
-    # vice-versa. The runtime always sends an explicit language; default is
-    # configurable for direct HTTP callers.
+    # Auto-LID is unreliable on 1–3 s clips (Lao↔Thai), so the runtime always
+    # sends an explicit language; direct HTTP callers get a configurable default.
     if lang in (None, "", "auto"):
-        lang = os.environ.get("VOXWEFT_ASR_DEFAULT_LANG", "chinese")
-    # Normalize ANY incoming form (Lao / lo / lao_Laoo / Laos / laotian / ...)
-    # to the label the SEA-SFT Qwen3-ASR was actually trained on in mlx.
-    # Empirical probe on the SEA-finetuned Qwen3-ASR weights (mlx_audio):
-    #   Lao audio: 'lao' → Lao script, BUT 'Lao'/'lo'/'lao_Laoo' → Thai script
-    #   Khmer     : 'khmer' → Khmer script
-    #   Burmese   : 'burmese' → Burmese (slow to decode but correct)
-    #   Thai      : 'thai'   → Thai
-    #   Vietnamese: 'vietnamese' → Vietnamese
-    #   Chinese   : any acceptable (model's support_languages has 'Chinese')
-    # The old lang_map/flores_map routed Lao → ISO 'lo', which the model had
-    # never been conditioned on, so it silently fell back to Thai.
-    NORM = {
-        "zh": "chinese", "zho": "chinese", "zho_hans": "chinese",
-        "zho_hant": "chinese", "chinese": "chinese", "cn": "chinese",
-        "mandarin": "chinese",
-        "lao": "lao", "lo": "lao", "lao_laoo": "lao", "laos": "lao",
-        "lao_laos": "lao", "laotian": "lao", "lo_lao": "lao", "old_lao": "lao",
-        "khmer": "khmer", "khm": "khmer", "km": "khmer", "khm_khmr": "khmer",
-        "burmese": "burmese", "my": "burmese", "mya": "burmese",
-        "mya_mymr": "burmese", "myanmar": "burmese",
-        "thai": "thai", "th": "thai", "tha_thai": "thai",
-        "vietnamese": "vietnamese", "viet": "vietnamese", "vi": "vietnamese",
-        "vie_latn": "vietnamese",
-        "indonesian": "indonesian", "id": "indonesian", "ind_latn": "indonesian",
-        "malay": "malay", "ms": "malay", "zsm_latn": "malay",
-    }
-    code = NORM.get(str(lang).lower(), str(lang).lower())
-    # Route by source language: SEA-SFT 80K for the fine-tuned six, Whisper for
-    # the rest (id/ms/fil/en). Whisper takes the English language name.
-    # ASR 同理走单线程 executor（MLX 非线程安全）。用单独的执行器，
-    # 这样 ASR 不必排在长 TTS 后面等。
+        lang = os.environ.get("VOXWEFT_ASR_DEFAULT_LANG", "Chinese")
+    from voxweft.runtime.router import FLORES_TO_NAME, normalize, whisper_lang
+    code = normalize(str(lang))
+    name = FLORES_TO_NAME.get(code, str(lang))
+
+    # Both models are thread-pinned (MLX is not thread-safe); ASR has its own
+    # executor so it never queues behind a long TTS generation.
     loop = asyncio.get_running_loop()
-    if code.lower() in _ASR_80K_LANGS:
-        asr = await _get_asr()
+    hint = _asr_language_hint(asr, name)
+    have_whisper = _whisper is not None or (WHISPER_DIR / "config.json").exists()
+    if hint is not None or not have_whisper:
+        # Qwen3-ASR: with the label when it knows it, auto-LID otherwise
+        # (also the path when no Whisper is installed).
+        if hint is None:
+            log.warning("ASR label %r not in Qwen3-ASR support_languages and no "
+                        "Whisper at %s — auto-LID", name, WHISPER_DIR)
         text = await loop.run_in_executor(
             _asr_executor,
-            lambda: asr.generate(audio, language=_asr_language_hint(asr, code), hotwords=hotwords))
+            lambda: asr.generate(audio, language=hint, hotwords=hotwords))
     else:
         w = await _get_whisper()
+        iso = whisper_lang(code)
         res = await loop.run_in_executor(
             _asr_executor,
-            lambda: w.generate(audio,
-                               language=code if code != "chinese" else None))
+            lambda: w.generate(audio, language=iso if len(iso) == 2 else None))
         text = getattr(res, "text", str(res))
     text = getattr(text, "text", str(text)).strip()
     return {"choices": [{"message": {"content": f"language {lang}<asr_text>{text}"}}]}
