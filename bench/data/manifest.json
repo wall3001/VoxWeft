@@ -1,0 +1,98 @@
+[
+ {
+  "id": "intro_zh_01",
+  "lang": "zh",
+  "wav": null,
+  "ref": "VoxWeft 是一套跑在 Apple Silicon 上的端侧同声传译系统。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_zh_02",
+  "lang": "zh",
+  "wav": null,
+  "ref": "你对着麦克风说话，它一边听一边切句，识别、翻译、合成三步全在本机完成，不联网，数据不出这台机器。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_zh_03",
+  "lang": "zh",
+  "wav": null,
+  "ref": "核心是我们把 VoxCPM2 移植到了 MLX：这是一个不依赖分词器的语音合成模型，覆盖三十种语言，五秒参考音频就能克隆音色。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_zh_04",
+  "lang": "zh",
+  "wav": null,
+  "ref": "流式解码器让第一段声音在三百毫秒内出来。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_zh_05",
+  "lang": "zh",
+  "wav": null,
+  "ref": "识别和大模型是乐高积木，默认给两套，你也可以换成自己的。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_zh_06",
+  "lang": "zh",
+  "wav": null,
+  "ref": "我们不比 BLEU，只保证管线不丢质量，并把踩过的每一个坑都写进了开发日志。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_en_01",
+  "lang": "en",
+  "wav": null,
+  "ref": "VoxWeft is an on-device simultaneous interpretation system for Apple Silicon.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_en_02",
+  "lang": "en",
+  "wav": null,
+  "ref": "You speak into the microphone and it segments your speech while you are still talking; recognition, translation and synthesis all run on this machine, offline, and nothing leaves it.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_en_03",
+  "lang": "en",
+  "wav": null,
+  "ref": "At the core is our port of VoxCPM2 to MLX: a tokenizer-free speech model covering thirty languages that can clone a voice from five seconds of reference audio.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_en_04",
+  "lang": "en",
+  "wav": null,
+  "ref": "A streaming decoder gets the first sound out in under three hundred milliseconds.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_en_05",
+  "lang": "en",
+  "wav": null,
+  "ref": "Recognition and the language model are Lego bricks: we ship two defaults, and you can swap in your own.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_en_06",
+  "lang": "en",
+  "wav": null,
+  "ref": "We do not compete on BLEU. We make sure the pipeline loses nothing, and we wrote every mistake we made into the devlog.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ }
+]

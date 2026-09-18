@@ -1,4 +1,4 @@
-"""ASR 开源替代评测 —— 在 voxlab (M2 16GB) 上跑。
+"""ASR 开源替代评测（Apple Silicon，MLX + sherpa-onnx）。
 
 用法:
     python bench_asr.py --model sea-private        # 私有基线（不随仓库分发）
@@ -21,41 +21,19 @@ import numpy as np
 import soundfile as sf
 from rapidfuzz.distance import Levenshtein
 
-HOME = os.path.expanduser("~")
-BENCH = os.environ.get("VOXWEFT_BENCH_DIR", f"{HOME}/asr_bench")
-MODELS = os.environ.get("VOXWEFT_MODEL_DIR", f"{HOME}/.voxweft/models")
+from paths import (BENCH, RESULTS, ensure_dirs, manifest, model_kind, model_path,
+                   wav_path)
+
 SR = 16000
-
-def _local(*cands):
-    """voxlab 上 HF 大文件被卡，模型走 ModelScope / GitHub 落到本地目录。"""
-    for c in cands:
-        hits = glob.glob(os.path.expanduser(c))
-        if hits:
-            return hits[0]
-    return cands[-1]
-
-MODELS = {
-    # private SEA fine-tune used as our internal baseline — not distributed.
-    # Point this at your own Qwen3-ASR fine-tune if you have one.
-    "sea-private":   ("qwen", os.environ.get("VOXWEFT_PRIVATE_ASR", f"{MODELS}/Qwen3-ASR-private")),
-    "qwen17":        ("qwen", _local(f"{BENCH}/models/models/Qwen--Qwen3-ASR-1.7B/snapshots/*", f"{BENCH}/models/models/Qwen/Qwen3-ASR-1.7B")),
-    "qwen06":        ("qwen", _local(f"{BENCH}/models/models/Qwen--Qwen3-ASR-0.6B/snapshots/*", f"{BENCH}/models/models/Qwen/Qwen3-ASR-0.6B")),
-    "whisper-turbo": ("whisper", _local(f"{BENCH}/models/models/mlx-community--whisper-large-v3-turbo/snapshots/*",
-                                        f"{BENCH}/models/models/mlx-community/whisper-large-v3-turbo")),
-    "whisper-v3":    ("whisper", _local(f"{BENCH}/models/models/mlx-community--whisper-large-v3-mlx-8bit/snapshots/*",
-                                        f"{BENCH}/models/models/mlx-community/whisper-large-v3-mlx-8bit")),
-    # Meta Omnilingual ASR（Apache-2.0，1600+ 语含 lo/km/my）。CTC 版语言无关，
-    # 走 sherpa-onnx（onnxruntime CPU）。这是 SEA-finetuned Qwen3-ASR 最直接的开源替代候选。
-    "omni-1b":       ("omni", f"{BENCH}/models/sherpa-onnx-omnilingual-asr-1600-languages-1B-ctc-int8-2025-11-12"),
-    "omni-300m":     ("omni", f"{BENCH}/models/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12"),
-    # seanghay 的高棉语续训（Apache-2.0，~700h DDD-Cambodia 数据，config 已含 Khmer 标签）
-    "qwen06-km":     ("qwen", _local("/tmp/khmer_asr", f"{BENCH}/models/Qwen3-ASR-0.6B-Khmer")),
-}
+ASR_MODELS = ["sea-private", "qwen17", "qwen06", "qwen06-km", "whisper-turbo",
+              "whisper-v3", "omni-1b", "omni-300m"]
 # Qwen3-ASR 的语言标签。SEA fine-tune 用的是小写训练标签；
 # 开源版用英文语言名。两套都试：先按模型类型给默认，跑不通再换。
-QWEN_LANG_SEA  = {"vi": "vietnamese", "km": "khmer", "lo": "lao", "th": "thai", "zh": "chinese"}
-QWEN_LANG_OPEN = {"vi": "Vietnamese", "km": "Khmer", "lo": "Lao", "th": "Thai", "zh": "Chinese"}
-WHISPER_LANG   = {"vi": "vi", "km": "km", "lo": "lo", "th": "th", "zh": "zh"}
+QWEN_LANG_SEA  = {"vi": "vietnamese", "km": "khmer", "lo": "lao", "th": "thai", "zh": "chinese",
+                  "en": "english", "my": "burmese", "id": "indonesian", "ms": "malay",
+                  "ja": "japanese", "ko": "korean", "de": "german", "fr": "french", "es": "spanish"}
+QWEN_LANG_OPEN = {k: v.capitalize() for k, v in QWEN_LANG_SEA.items()}
+WHISPER_LANG   = {k: k for k in QWEN_LANG_SEA}
 
 _ZW = dict.fromkeys(map(ord, "​‌‍﻿⁠"), None)
 
@@ -145,7 +123,7 @@ def load_asr(kind: str, path: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, choices=MODELS)
+    ap.add_argument("--model", required=True, choices=ASR_MODELS)
     ap.add_argument("--langs", default="vi,km,lo")
     ap.add_argument("--limit", type=int, default=0, help="每语种最多跑 N 条")
     ap.add_argument("--chunk", type=float, default=30.0)
@@ -156,11 +134,11 @@ def main():
     ap.add_argument("--adaptive", action="store_true", help="prod 切分器用自适应门限（噪声底×5，夹在 0.006–sil_thresh）")
     ap.add_argument("--min-sil", type=float, default=0.45); ap.add_argument("--max-utt", type=float, default=6.0)
     a = ap.parse_args()
-    kind, path = MODELS[a.model]
+    kind, path = model_kind(a.model), model_path(a.model)
     is_sea = a.model == "sea-private"
     langs = a.langs.split(",")
 
-    mani = json.load(open(f"{BENCH}/manifest.json"))
+    mani = manifest()
     items = [x for x in mani if x["lang"] in langs]
     if a.limit:
         keep = []
@@ -176,7 +154,7 @@ def main():
 
     results = []; per_lang = {}
     for it in items:
-        audio, sr = sf.read(f"{BENCH}/wav/{it['wav']}", dtype="float32")
+        audio, sr = sf.read(wav_path(it), dtype="float32")
         assert sr == SR
         if audio.ndim > 1: audio = audio.mean(axis=1)
         segs = prod_chunks(audio, a.sil_thresh, a.adaptive, a.min_sil, a.max_utt) if a.seg == "prod" else chunks(audio, a.chunk)
@@ -213,9 +191,9 @@ def main():
         summ[lg] = s
         print(f"   {lg}: n={s['n']}  CER {s['cer_mean']:.1%}" + (f"  WER {s['wer_mean']:.1%}" if s["wer_mean"] is not None else "")
               + f"  RTF {s['rtf_mean']:.2f}  ({s['dur_s']}s 音频)")
-    os.makedirs(f"{BENCH}/results", exist_ok=True)
+    ensure_dirs()
     json.dump({"model": a.model + a.tag, "path": path, "chunk_s": a.chunk, "seg": a.seg, "summary": summ, "items": results},
-              open(f"{BENCH}/results/{a.model}{a.tag}.json", "w"), ensure_ascii=False, indent=1)
+              open(f"{RESULTS}/{a.model}{a.tag}.json", "w"), ensure_ascii=False, indent=1)
     print(f"   -> results/{a.model}{a.tag}.json")
 
 if __name__ == "__main__":

@@ -179,6 +179,14 @@ Disproved. `quantize_lm=4` vs bf16, 5 runs each: duration jitter 1.44 s vs
 there (same text, same params, 3.84–6.40 s duration across 6 runs) is the
 model sampling normally without a seed. Keep the 4-bit; keep the memory.
 
+### 2.5 Acronyms are read as words
+
+TTS round-trip on the intro text: "We do not compete on BLEU" came back as
+"We do not compete on being young" — VoxCPM2 read `BLEU` as the French word,
+the ASR heard what it heard. Text normalization (spell out or hyphenate
+acronyms before synthesis) is the client's job; the runtime does not do it.
+CER on that sentence: 40%. Everything else in the set: 0–9%.
+
 ---
 
 ## 3. Streaming TTS engineering
@@ -205,6 +213,30 @@ non-streaming full decode produce identical output (0.0% difference).
 This is what makes 0.51 s first-audio possible vs 9.3 s for the upstream
 non-streaming path — and it is *not* where any audible artefact comes from.
 Golden test: `tests/test_core_golden.py::test_streaming_equals_full`.
+
+### ⚠️ 3.4 Loading a second model evicts the first one's buffer cache
+
+**Symptom.** Bridge first real TTS request 720–762 ms first byte; every
+request after it 305 ms; in-process streaming on the same machine 286 ms.
+Warm-up had run and `/ready` was 200.
+
+**Disproved first.** "Warm-up didn't exercise the full path" — we changed
+warm-up from 3 patches of "你好" to a full 23-patch sentence. First request
+still 720 ms. Not compile.
+
+**Root cause.** Order of warm-up: TTS loaded and primed, *then* ASR (another
+~3 GB) loaded. On a 16 GB M2 the second load evicts the first model's MLX
+buffer cache; the next TTS inference re-allocates. A plain ASR *inference*
+afterwards does not evict again (measured: 301 ms TTS after an ASR call) —
+it is specifically the load.
+
+**Fix.** After all models are loaded, run one short TTS generation
+(`_reprime_tts`, ~2.3 s at start-up, once). First request: 311 ms. Any
+process that hosts more than one MLX model should prime *after the last
+load*, not after each one.
+
+**Cost.** 450 ms on every cold session for as long as the stage build ran,
+invisible on M3 Ultra because 512 GB never evicts anything.
 
 ### 3.3 Client jitter buffer: periodic "click" was a scheduling artefact
 
@@ -406,13 +438,23 @@ It was the reset. The task exited immediately and the generation counter
 advanced by 2–3 per press instead of 1. If a flag reset looks redundant,
 find who reads it before deleting it.
 
-### 7.5 Health probes: `/health` ≠ `/ready`
+### 7.5 Command Line Tools ≠ a Swift toolchain
+
+On one M2 with CLT only (`swiftlang-6.0.3.1.10`), the SDK was built by
+`swiftlang-6.0.3.1.5`: SwiftPM could not even link `Package.swift`
+(undefined `PackageDescription.Package.__allocating_init`), and plain
+`swiftc` failed on `CoreFoundation` with "this SDK is not supported by the
+compiler". Nothing in the project is at fault; the CLT install is internally
+inconsistent. `app/build.sh` exists so a `swiftc`-only path is available, but
+if you see those two errors, reinstall CLT or use a machine with Xcode.
+
+### 7.6 Health probes: `/health` ≠ `/ready`
 
 `/health` is "process alive" and is true during the 1.7 s cold start;
 `/ready` is "models loaded and warmed". Watchdogs and client start-up
 checks must probe `/ready`, or users eat the cold start.
 
-### 7.6 Non-daemon executor threads make restarts slow
+### 7.7 Non-daemon executor threads make restarts slow
 
 `ThreadPoolExecutor` threads are non-daemon; without an explicit
 `shutdown(wait=False, cancel_futures=True)` on process exit, launchd
@@ -452,12 +494,6 @@ real-time with margin. See `docs/HARDWARE.md`.
 
 ## Open — measured but not yet explained
 
-* **Bridge HTTP first byte 762 ms vs in-process 304 ms** (M2, same model,
-  same 6 steps, `warmup_patches=0`). The bridge yields every patch without
-  buffering, so it is not chunking. Suspects: warm-up only runs 3 patches on
-  a 2-character text, so kernels for longer prefill / later patches compile
-  on the first real request; or `requests` first-byte accounting. Measure
-  second request on the same bridge before touching code.
 * **Loudness variance between runs** (same text/params: whole-signal RMS
   0.006–0.11, peaks up to 0.97). Known model behaviour without a seed
   (`TTS-FINDINGS.md` §3); a peak of 0.97 is one bad run from clipping.

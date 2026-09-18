@@ -18,3 +18,5 @@ bench/logs/
 bench/models/
 bench/relay/
 .pytest_cache/
+app/.build/
+app/*.app

@@ -1,0 +1,6 @@
+VoxWeft is an on-device simultaneous interpretation system for Apple Silicon.
+You speak into the microphone and it segments your speech while you are still talking; recognition, translation and synthesis all run on this machine, offline, and nothing leaves it.
+At the core is our port of VoxCPM2 to MLX: a tokenizer-free speech model covering thirty languages that can clone a voice from five seconds of reference audio.
+A streaming decoder gets the first sound out in under three hundred milliseconds.
+Recognition and the language model are Lego bricks: we ship two defaults, and you can swap in your own.
+We do not compete on BLEU. We make sure the pipeline loses nothing, and we wrote every mistake we made into the devlog.

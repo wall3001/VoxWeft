@@ -1,4 +1,4 @@
-"""翻译候选评测 —— voxlab (M2 16GB)，mlx-lm。
+"""翻译候选评测（Apple Silicon，mlx-lm）。
 
     python bench_mt.py --model qwen3-4b | qwen3-8b | hy-mt2 | milmmt | gemma4-e4b
 
@@ -14,22 +14,9 @@ from mlx_lm import load, generate
 from mlx_lm.sample_utils import make_sampler, make_repetition_penalty
 from sacrebleu.metrics import CHRF
 
-HOME = os.path.expanduser("~"); BENCH = os.environ.get("VOXWEFT_BENCH_DIR", f"{HOME}/asr_bench"); MODELS = os.environ.get("VOXWEFT_MODEL_DIR", f"{HOME}/.voxweft/models")
+from paths import RESULTS, ensure_dirs, manifest, model_kind, model_path
 
-def _local(*c):
-    for x in c:
-        h = glob.glob(os.path.expanduser(x))
-        if h: return h[0]
-    return c[-1]
-
-M = f"{BENCH}/models/models"
-MODELS = {
-    "qwen3-4b":   ("chat",   f"{MODELS}/Qwen3-4B-Instruct-2507-4bit"),
-    "qwen3-8b":   ("chat",   _local(f"{BENCH}/relay/mlx-community--Qwen3-8B-4bit", f"{M}/mlx-community--Qwen3-8B-4bit/snapshots/*")),
-    "hy-mt2":     ("hymt",   _local(f"{M}/mlx-community--Hy-MT2-1.8B-8bit/snapshots/*")),
-    "milmmt":     ("milmmt", _local(f"{BENCH}/relay/mlx-community--MiLMMT-46-4B-v0.1-6bit", f"{M}/mlx-community--MiLMMT-46-4B-v0.1-6bit/snapshots/*")),
-    "gemma4-e4b": ("chat",   _local(f"{BENCH}/relay/mlx-community--gemma-4-E4B-it-4bit", f"{M}/mlx-community--gemma-4-E4B-it-4bit/snapshots/*")),
-}
+MT_MODELS = ["qwen3-4b", "qwen3-8b", "hy-mt2", "milmmt", "gemma4-e4b"]
 # 各模板用的语言名
 EN = {"zh": "Chinese", "lo": "Lao", "vi": "Vietnamese", "km": "Khmer", "th": "Thai"}
 ZH = {"zh": "中文", "lo": "老挝语", "vi": "越南语", "km": "高棉语", "th": "泰语"}
@@ -66,11 +53,11 @@ def clean(kind, out):
     return out.strip()
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--model", required=True, choices=MODELS)
+    ap = argparse.ArgumentParser(); ap.add_argument("--model", required=True, choices=MT_MODELS)
     ap.add_argument("--max-tokens", type=int, default=400)
-    a = ap.parse_args(); kind, path = MODELS[a.model]
+    a = ap.parse_args(); kind, path = model_kind(a.model), model_path(a.model)
 
-    mani = json.load(open(f"{BENCH}/manifest.json"))
+    mani = manifest()
     lo = [x for x in mani if x["lang"] == "lo"]
     def head(s, n=2):
         parts = re.split(r"(?<=[.!?。！？])\s+", s.strip()); return " ".join(parts[:n])
@@ -106,8 +93,8 @@ def main():
         hyp, dt = tr(src, tgt, text)
         res["noref"].append({"dir": f"{src}->{tgt}", "src": text, "hyp": hyp, "sec": round(dt, 2)})
         print(f"   {src}->{tgt} {dt:5.1f}s | {text[:40]} ⇒ {hyp[:70]}", flush=True)
-    os.makedirs(f"{BENCH}/results", exist_ok=True)
-    json.dump(res, open(f"{BENCH}/results/mt_{a.model}.json", "w"), ensure_ascii=False, indent=1)
+    ensure_dirs()
+    json.dump(res, open(f"{RESULTS}/mt_{a.model}.json", "w"), ensure_ascii=False, indent=1)
     print(f"   -> results/mt_{a.model}.json")
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ pip install "voxweft[runtime]" # + segmenter, ASR/LLM adapters, WebSocket server
 
 ```
               ┌──────────────────────────────────────────────────────┐
-   L3         │  CLI  ·  MCP server  ·  (Swift app, separate repo)   │  wrappers — thin, replaceable
+   L3         │  CLI  ·  MCP server  ·  macOS shell (app/)           │  wrappers — thin, replaceable
               └──────────────────────────────────────────────────────┘
               ┌──────────────────────────────────────────────────────┐
    L2         │  segmenter / endpointing  →  ASR  →  MT | LLM        │  runtime — MLX only,
@@ -48,8 +48,8 @@ plug them in, but you download the weights. Everything runs on MLX; we do not
 support Ollama or other CPU-first runtimes because they cannot hit the
 latency budget on this hardware.
 
-**L3 is whatever fits.** CLI and MCP are here. The macOS SwiftUI client we
-demoed lives out of tree.
+**L3 is whatever fits.** CLI, MCP, and a ~500-line SwiftUI shell in `app/`
+with hold-to-talk, latency chips and a mic-free demo. Disposable by design.
 
 ## Quick start — L1
 
@@ -134,6 +134,8 @@ No model weights are in this repo. `docs/MODELS.md` has download notes
 | TTS first audio, streaming, warm | 304 ms (zero-shot) · 403 ms (clone) | 124–168 ms |
 | TTS RTF (4-bit, 6 steps) | 1.48 | ≈ 0.2 |
 | ASR → MT → first TTS chunk, per segment | — | ≈ 0.85 s |
+| text → MT (Qwen3-4B) → first TTS chunk, per sentence | 2.35 s median | — |
+| TTS ASR-round-trip CER on the repo intro (zh / en) | 3.4% / 7.8% | |
 | Segmenter, phone mic, ASR CER fixed→adaptive threshold | 16.3% → 10% | |
 
 RTF 1.48 means a base M2 produces audio slower than it plays — the streaming
@@ -163,6 +165,7 @@ voxweft/
   runtime/     segmenter · router · orchestrator · translator     L2
                bridge.py (TTS+ASR HTTP) · server.py (WebSocket)
   wrappers/    mcp_server.py                                      L3
+app/           SwiftUI macOS shell (hold-to-talk, latency chips, demo)  L3
 tests/         golden alignment (needs model) · segmenter · router · orchestrator (no model)
 bench/         asr / mt / tts benches + ASR-round-trip judge
 scripts/       convert_vae.py · probe_{onset,stream,clone,perf,caption_leak}.py

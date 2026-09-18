@@ -1,4 +1,4 @@
-"""TTS 评测 —— voxlab (M2 16GB)。
+"""TTS 评测（Apple Silicon）。
 
     python bench_tts.py --engine ours      # voxweft.core（我们的移植，4-bit，流式）
     python bench_tts.py --engine mlxaudio  # mlx-audio 内置 voxcpm2，用 mlx-community/VoxCPM2-4bit
@@ -11,36 +11,30 @@ import argparse, json, os, time, glob
 import numpy as np
 import soundfile as sf
 
-HOME = os.path.expanduser("~"); BENCH = os.environ.get("VOXWEFT_BENCH_DIR", f"{HOME}/asr_bench"); MODELS = os.environ.get("VOXWEFT_MODEL_DIR", f"{HOME}/.voxweft/models"); OUT = f"{BENCH}/tts_out"
-os.makedirs(OUT, exist_ok=True)
-
-def _local(*c):
-    for x in c:
-        h = glob.glob(os.path.expanduser(x))
-        if h: return h[0]
-    return c[-1]
+from paths import RESULTS, TTS_OUT as OUT, ensure_dirs, manifest, model_path
+ensure_dirs()
 
 def texts():
-    mani = json.load(open(f"{BENCH}/manifest.json"))
-    by = {x["id"]: x for x in mani}
-    def first_sent(s, seps, maxlen=110):
+    """Text set for the TTS bench: every manifest item that has a `ref`,
+    text-only items included. Long refs are cut to their first sentence so
+    the run stays short and per-item RTF is comparable."""
+    seps = {"km": ["។"], "lo": ["\n", ". "], "zh": ["。", "！", "？"]}
+
+    def first_sent(s, lang, maxlen=110):
         s = s.strip()
-        for sep in seps:
+        for sep in seps.get(lang, [". ", "\n"]):
             i = s.find(sep)
-            if 0 < i < maxlen: return s[:i+len(sep)].strip()
-        # 没找到句末：在 maxlen 前最后一个空格处截
-        cut = s[:maxlen]; j = cut.rfind(" ")
+            if 0 < i < maxlen:
+                return s[:i + len(sep)].strip()
+        cut = s[:maxlen]
+        j = cut.rfind(" ")
         return (cut[:j] if j > 40 else cut).strip()
-    return [
-        ("zh", "第23届中国—东盟博览会将于9月17日至21日在广西南宁举办。"),
-        ("zh", "这台机器本地完成语音识别、大模型推理和语音合成，不联网也能对话。"),
-        ("vi", first_sent(by["vi_01"]["ref"], [". "])),
-        ("vi", first_sent(by["vi_03"]["ref"], [". "])),
-        ("lo", first_sent(by["lo_01"]["ref"], ["\n", ". "])),
-        ("lo", first_sent(by["lo_03"]["ref"], ["\n", ". "])),
-        ("km", first_sent(by["km_07"]["ref"], ["។"])),
-        ("km", first_sent(by["km_10"]["ref"], ["។"])),
-    ]
+
+    out = []
+    for it in manifest():
+        if it.get("ref"):
+            out.append((it["lang"], first_sent(it["ref"], it["lang"])))
+    return out
 
 def resample_to_16k(a: np.ndarray, sr: int) -> np.ndarray:
     if sr == 16000: return a
@@ -52,7 +46,7 @@ def run_ours(steps):
     import sys; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from voxweft.core import VoxCPM2Pipeline
     t0 = time.perf_counter()
-    pipe = VoxCPM2Pipeline(f"{MODELS}/VoxCPM2", inference_timesteps=steps, quantize_lm=4)
+    pipe = VoxCPM2Pipeline(model_path("voxcpm2"), inference_timesteps=steps, quantize_lm=4)
     load = time.perf_counter() - t0
     def synth(text, lang=None):
         chunks = []; t1 = time.perf_counter(); first = None
@@ -66,7 +60,7 @@ def run_ours(steps):
 def run_mlxaudio(steps):
     import mlx.core as mx
     from mlx_audio.tts.utils import load_model
-    path = _local(f"{BENCH}/relay/mlx-community--VoxCPM2-4bit", f"{BENCH}/models/models/mlx-community--VoxCPM2-4bit/snapshots/*")
+    path = model_path("voxcpm2-mlxaudio")
     t0 = time.perf_counter(); model = load_model(path); load = time.perf_counter() - t0
     sr = int(model.sample_rate)
     def synth(text, lang=None):
@@ -83,7 +77,7 @@ def run_omnivoice(steps):
     """k2-fsa OmniVoice（0.6B Qwen3 骨干，非自回归掩码扩散，646 语，Apache-2.0）—— M2 级机器的轻量 TTS 候选。
     steps 这里映射到 num_steps（默认 32）。lo/km/my 训练数据只有 7–12 小时，可懂度要靠回环 ASR 判。"""
     from mlx_audio.tts.utils import load_model
-    path = _local(f"{BENCH}/relay/mlx-community--OmniVoice")
+    path = model_path("omnivoice")
     t0 = time.perf_counter(); model = load_model(path); load = time.perf_counter() - t0
     sr = int(model.sample_rate)
     LANG = {"zh": "Chinese", "vi": "Vietnamese", "lo": "Lao", "km": "Khmer"}
@@ -116,7 +110,7 @@ def main():
         print(f"   {lang} #{i}  首包 {first or 0:.2f}s  总 {total:5.1f}s  音频 {dur:5.1f}s  RTF {rtf:.2f} | {text[:40]}", flush=True)
     import statistics as st
     print(f"\n== {a.engine} 汇总: 首包中位 {st.median(r['first_s'] for r in rows):.2f}s  RTF 中位 {st.median(r['rtf'] for r in rows):.2f}")
-    json.dump(rows, open(f"{BENCH}/results/tts_{a.engine}{"-s"+str(a.steps) if a.engine=="omnivoice" and a.steps>=8 else ""}.json", "w"), ensure_ascii=False, indent=1)
+    json.dump(rows, open(f"{RESULTS}/tts_{a.engine}{"-s"+str(a.steps) if a.engine=="omnivoice" and a.steps>=8 else ""}.json", "w"), ensure_ascii=False, indent=1)
 
 if __name__ == "__main__":
     main()

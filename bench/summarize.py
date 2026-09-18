@@ -1,6 +1,6 @@
 """汇总 results/*.json → 一张表。python summarize.py"""
 import json, glob, os, statistics as st
-R = os.path.expanduser("~/asr_bench/results")
+from paths import RESULTS as R, MANIFEST
 rows = {}
 for f in sorted(glob.glob(f"{R}/*.json")):
     b = os.path.basename(f)

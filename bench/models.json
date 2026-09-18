@@ -1,0 +1,22 @@
+{
+  "_doc": "logical name → {kind, paths}. paths are globs, relative to VOXWEFT_MODEL_DIR unless absolute; first hit wins. Override any entry with VOXWEFT_MODEL_<NAME>. The two hub-cache layouts (HF snapshots/*, ModelScope owner/name) are both listed so either download route works.",
+
+  "voxcpm2":        {"kind": "voxcpm2", "paths": ["VoxCPM2", "openbmb/VoxCPM2"]},
+  "voxcpm2-mlxaudio": {"kind": "mlxaudio-tts", "paths": ["mlx-community--VoxCPM2-4bit", "mlx-community--VoxCPM2-4bit/snapshots/*", "mlx-community/VoxCPM2-4bit"]},
+  "omnivoice":      {"kind": "mlxaudio-tts", "paths": ["mlx-community--OmniVoice", "mlx-community/OmniVoice"]},
+
+  "qwen17":         {"kind": "qwen", "paths": ["Qwen3-ASR-1.7B", "Qwen--Qwen3-ASR-1.7B/snapshots/*", "Qwen/Qwen3-ASR-1.7B"]},
+  "qwen06":         {"kind": "qwen", "paths": ["Qwen3-ASR-0.6B", "Qwen--Qwen3-ASR-0.6B/snapshots/*", "Qwen/Qwen3-ASR-0.6B"]},
+  "qwen06-km":      {"kind": "qwen", "paths": ["Qwen3-ASR-0.6B-Khmer"]},
+  "sea-private":    {"kind": "qwen", "paths": ["Qwen3-ASR-private"], "_note": "private SEA fine-tune, our internal baseline; not distributed"},
+  "whisper-turbo":  {"kind": "whisper", "paths": ["whisper-large-v3-turbo", "mlx-community--whisper-large-v3-turbo/snapshots/*", "mlx-community/whisper-large-v3-turbo"]},
+  "whisper-v3":     {"kind": "whisper", "paths": ["whisper-large-v3-mlx-8bit", "mlx-community--whisper-large-v3-mlx-8bit/snapshots/*", "mlx-community/whisper-large-v3-mlx-8bit"]},
+  "omni-1b":        {"kind": "omni", "paths": ["sherpa-onnx-omnilingual-asr-1600-languages-1B-ctc-int8-*"]},
+  "omni-300m":      {"kind": "omni", "paths": ["sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-*"]},
+
+  "qwen3-4b":       {"kind": "chat",   "paths": ["Qwen3-4B-Instruct-2507-4bit", "mlx-community--Qwen3-4B-Instruct-2507-4bit/snapshots/*"]},
+  "qwen3-8b":       {"kind": "chat",   "paths": ["Qwen3-8B-4bit", "mlx-community--Qwen3-8B-4bit", "mlx-community--Qwen3-8B-4bit/snapshots/*"]},
+  "hy-mt2":         {"kind": "hymt",   "paths": ["Hy-MT2-1.8B-8bit", "mlx-community--Hy-MT2-1.8B-8bit/snapshots/*"]},
+  "milmmt":         {"kind": "milmmt", "paths": ["MiLMMT-46-4B-v0.1-6bit", "mlx-community--MiLMMT-46-4B-v0.1-6bit", "mlx-community--MiLMMT-46-4B-v0.1-6bit/snapshots/*"]},
+  "gemma4-e4b":     {"kind": "chat",   "paths": ["gemma-4-E4B-it-4bit", "mlx-community--gemma-4-E4B-it-4bit", "mlx-community--gemma-4-E4B-it-4bit/snapshots/*"]}
+}

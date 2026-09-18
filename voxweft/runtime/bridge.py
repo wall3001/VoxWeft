@@ -114,7 +114,9 @@ _voice_prompt_wav = os.environ.get(
 _tts_temperature = float(os.environ.get("VOXWEFT_TTS_TEMPERATURE", "1.0"))
 _tts_cfg = float(os.environ.get("VOXWEFT_TTS_CFG", "2.0"))
 _tts_warmup_patches = int(os.environ.get("VOXWEFT_TTS_WARMUP_PATCHES", "0"))
-_tts_inference_steps = int(os.environ.get("VOXWEFT_TTS_STEPS", "10"))
+_tts_inference_steps = int(os.environ.get("VOXWEFT_TTS_STEPS", "6"))
+_tts_warmup_text = os.environ.get("VOXWEFT_TTS_WARMUP_TEXT",
+                                  "欢迎使用语音合成服务，这是一次预热。")
 
 
 def _load_tts_sync():
@@ -492,13 +494,20 @@ def main(argv=None):
                     log.info("warmup: TTS loaded in %.1fs", time.perf_counter() - t1)
                     _load_default_voice_sync()
                     t2 = time.perf_counter()
-                    for i, _ in enumerate(tts.generate_streaming(
-                            "你好", ref_latents=_voice_ref_latents,
+                    # Run a realistic sentence to completion. Priming with
+                    # "你好" and breaking after 3 patches left the first real
+                    # request paying ~450 ms of compile (M2: 747 ms first
+                    # byte vs 305 ms for every request after it). The
+                    # stop head and a normal-length prefill only get
+                    # exercised on a full generation. DEVLOG §3.1.
+                    n_patches = 0
+                    for _ in tts.generate_streaming(
+                            _tts_warmup_text, ref_latents=_voice_ref_latents,
                             temperature=_tts_temperature, cfg_value=_tts_cfg,
-                            warmup_patches=_tts_warmup_patches)):
-                        if i >= 2:
-                            break
-                    log.info("warmup: TTS primed in %.1fs", time.perf_counter() - t2)
+                            warmup_patches=_tts_warmup_patches):
+                        n_patches += 1
+                    log.info("warmup: TTS primed in %.1fs (%d patches)",
+                             time.perf_counter() - t2, n_patches)
 
                 _tts_executor.submit(_prime_tts).result(timeout=300)
 
@@ -511,6 +520,24 @@ def main(argv=None):
                     log.info("warmup: ASR primed in %.1fs", time.perf_counter() - t3)
 
                 _asr_executor.submit(_prime_asr).result(timeout=300)
+
+                # Re-prime TTS *after* ASR has loaded. Measured on M2 16 GB:
+                # with TTS primed first and ASR loaded second, the first real
+                # TTS request still paid ~450 ms (720 ms vs 305 ms steady)
+                # regardless of how long the TTS warm-up ran. Loading a second
+                # multi-GB model evicts the first one's MLX buffer cache; the
+                # cheapest fix is one short generation once both are resident.
+                t4 = time.perf_counter()
+
+                def _reprime_tts():
+                    for _ in _tts.generate_streaming(
+                            "再热一次。", ref_latents=_voice_ref_latents,
+                            temperature=_tts_temperature, cfg_value=_tts_cfg,
+                            warmup_patches=_tts_warmup_patches):
+                        pass
+
+                _tts_executor.submit(_reprime_tts).result(timeout=120)
+                log.info("warmup: TTS re-primed after ASR in %.1fs", time.perf_counter() - t4)
 
                 log.info("warmup done (total %.1fs)", time.perf_counter() - t0)
                 _warmup_done.set()
