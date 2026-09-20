@@ -14,8 +14,8 @@ that machine is first audio 18× sooner (0.5 s vs 9.3 s).
 
 ## Memory (16 GB base M2, all resident)
 
-Qwen3-ASR-1.7B 8-bit 2.2 GB · Qwen3-4B 4-bit 2.8 GB · VoxCPM2 4-bit 3.0 GB
-≈ 8 GB. Add Hy-MT2-1.8B 4-bit (1.3 GB) or NLLB-1.3B for MT if you route
+Qwen3-ASR-1.7B 8-bit 2.5 GB · Qwen3-4B 4-bit 2.3 GB · VoxCPM2 4-bit 2.1 GB
+≈ 6.7 GB measured resident. Add Hy-MT2-1.8B 4-bit (1.3 GB) or NLLB-1.3B for MT if you route
 zh→SEA. Lazy loading per language pair is not implemented; everything you
 configure is loaded at warm-up.
 

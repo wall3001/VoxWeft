@@ -5,7 +5,7 @@ Nothing is bundled. Default layout `~/.voxweft/models/` (`VOXWEFT_MODEL_DIR`).
 | slot | dir | source | notes |
 |---|---|---|---|
 | TTS | `VoxCPM2/` | [OpenBMB/VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | run `scripts/convert_vae.py` once (audiovae.pth → `vae_mlx.safetensors`); LM loads by name, no conversion |
-| ASR | `Qwen3-ASR-1.7B/` | Qwen/Qwen3-ASR-1.7B | via mlx-audio; 0.6B is the low-memory alt |
+| ASR | `Qwen3-ASR-1.7B-8bit/` | mlx-community/Qwen3-ASR-1.7B-8bit | 2.5 GB, RTF 0.11; transcripts identical to bf16 on our set. bf16 `Qwen/Qwen3-ASR-1.7B` if you insist (4.1 GB) |
 | ASR alt | `whisper-large-v3-turbo/` | mlx-community | non-SEA languages |
 | LLM/MT | `Qwen3-4B-Instruct-2507-4bit/` | mlx-community | `VOXWEFT_LLM_DIR`; 8B if you have the memory |
 | MT alt | `Hy-MT2-1.8B-4bit/` | mlx-community | zh↔vi/th/km/my/en, fast |

@@ -76,7 +76,7 @@ Two processes, both from the venv:
 ```bash
 export VOXWEFT_MODEL_DIR=~/.voxweft/models
 export VOXWEFT_LLM_DIR=$VOXWEFT_MODEL_DIR/Qwen3-4B-Instruct-2507-4bit
-export VOXWEFT_ASR_MODEL=$VOXWEFT_MODEL_DIR/Qwen3-ASR-1.7B
+export VOXWEFT_ASR_MODEL=$VOXWEFT_MODEL_DIR/Qwen3-ASR-1.7B-8bit
 export VOXWEFT_VOICE_PROMPT_WAV=/path/to/5s_reference.wav   # optional but recommended
 
 voxweft bridge --port 8133 &        # poll GET http://127.0.0.1:8133/ready until 200

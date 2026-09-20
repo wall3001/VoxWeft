@@ -28,7 +28,7 @@ log = logging.getLogger("voxweft.bridge")
 BASE = Path(os.path.dirname(os.path.abspath(__file__)))
 MODEL_DIR = Path(os.environ.get("VOXWEFT_MODEL_DIR", os.environ.get("MODEL_DIR", str(Path.home() / ".voxweft/models"))))
 VoxCPM2_DIR = Path(os.environ.get("VOXCPM2_MODEL", str(MODEL_DIR / "VoxCPM2")))
-ASR_DIR = Path(os.environ.get("VOXWEFT_ASR_MODEL", str(MODEL_DIR / "Qwen3-ASR-1.7B")))
+ASR_DIR = Path(os.environ.get("VOXWEFT_ASR_MODEL", str(MODEL_DIR / "Qwen3-ASR-1.7B-8bit")))
 WHISPER_DIR = Path(os.environ.get("VOXWEFT_WHISPER_MODEL", str(MODEL_DIR / "whisper-large-v3-turbo")))
 
 app = FastAPI(title="voxweft bridge")

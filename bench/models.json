@@ -25,6 +25,9 @@
   "qwen17": {
     "kind": "qwen",
     "paths": [
+      "Qwen3-ASR-1.7B-8bit",
+      "mlx-community--Qwen3-ASR-1.7B-8bit/snapshots/*",
+      "mlx-community/Qwen3-ASR-1.7B-8bit",
       "Qwen3-ASR-1.7B",
       "Qwen--Qwen3-ASR-1.7B/snapshots/*",
       "Qwen/Qwen3-ASR-1.7B"

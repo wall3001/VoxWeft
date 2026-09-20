@@ -97,7 +97,7 @@ WebSocket.
 
 ```bash
 pip install -e ".[runtime]"
-export VOXWEFT_MODEL_DIR=~/.voxweft/models         # VoxCPM2/, Qwen3-ASR-1.7B/, <llm>/
+export VOXWEFT_MODEL_DIR=~/.voxweft/models         # VoxCPM2/, Qwen3-ASR-1.7B-8bit/, <llm>/
 export VOXWEFT_LLM_DIR=$VOXWEFT_MODEL_DIR/Qwen3-4B-Instruct-2507-4bit
 export VOXWEFT_VOICE_DIR=samples/voices          # <lang>_tgt.wav → the interpreter's voice per target language
 
@@ -115,7 +115,7 @@ with the measured level when nothing was cut.
 | slot | default | alt | licence |
 |---|---|---|---|
 | TTS | VoxCPM2 (4-bit) | — | Apache-2.0 |
-| ASR | Qwen3-ASR-1.7B via mlx-audio (zh/en/vi/th/id/ms + 20 more) | Qwen3-ASR-0.6B | Apache-2.0 |
+| ASR | Qwen3-ASR-1.7B **8-bit** via mlx-audio (zh/en/vi/th/id/ms + 20 more) — 2.5 GB, RTF 0.11, transcripts identical to bf16 on our set | bf16 (4.1 GB) · 0.6B | Apache-2.0 |
 | ASR, lo/km/my | whisper-large-v3-turbo (MLX) — routed automatically; **quality is poor** (Lao often comes back in Thai script) | Omnilingual-ASR CTC via sherpa-onnx is the better open option (adapter not written yet) | MIT |
 | LLM / MT | Qwen3-4B-Instruct (mlx-lm) | Qwen3-8B · Hy-MT2-1.8B | Apache-2.0 |
 | MT fallback | NLLB-200-1.3B | — | **CC-BY-NC-4.0**, opt-in, research only |
@@ -152,9 +152,9 @@ build.
 |---|---|---|
 | VoxCPM2 4-bit TTS, first audio (warm) | 303 ms | 124–168 ms |
 | VoxCPM2 4-bit TTS, RTF | **1.47** | ≈ 0.2 |
-| Qwen3-ASR-1.7B, 4 s segment | 950 ms (RTF 0.24) | — |
+| Qwen3-ASR-1.7B 8-bit, 10 s clip | 1.2 s (RTF 0.11) · bf16: RTF 0.24 | — |
 | Qwen3-4B 4-bit, one sentence zh→en | first token 405 ms · 16 tok in 870 ms | — |
-| resident memory, all three | 8.5 GB | — |
+| resident memory, all three | **6.7 GB** (bf16 ASR: 8.5) | — |
 
 | end to end, `/ws/voice/v2`, designed source voice as microphone | M2 16 GB | M3 Ultra |
 |---|---|---|
