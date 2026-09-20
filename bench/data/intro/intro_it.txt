@@ -1,0 +1,2 @@
+VoxWeft è un sistema di interpretazione simultanea che gira interamente su chip Apple.
+Tu parli, lui traduce mentre parli, e nulla lascia mai la macchina.

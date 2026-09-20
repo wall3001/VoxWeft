@@ -333,7 +333,7 @@ def test_sea_to_sea_direct():
         mode="interpreter", src_lang="lo", tgt_lang="th",
         send_json=h.send_json, send_bytes=h.send_bytes,
         engines=eng, use_smart_turn=False)
-    assert orch.routes.translate.backend == "nllb", orch.routes.translate
+    assert orch.routes.translate.backend == "llm", orch.routes.translate
     assert "direct" in orch.routes.translate.reason
     loop.run_until_complete(orch.aclose()); loop.close()
     print("✓ test_sea_to_sea_direct")

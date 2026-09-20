@@ -126,12 +126,15 @@ def _bridge_asr(audio: np.ndarray, language: str | None, hotwords) -> dict:
             "latency_ms": (time.perf_counter() - t0) * 1000}
 
 
-def _bridge_tts_stream(text: str):
-    """POST /generate stream=true; bridge emits int16 @48k, we yield float32."""
+def _bridge_tts_stream(text: str, voice: str | None = None):
+    """POST /generate stream=true; bridge emits int16 @48k, we yield float32.
+    `voice` names a reference installed on the bridge (VOXWEFT_VOICE_DIR);
+    unknown ids fall back to the bridge default."""
     import requests
-    r = requests.post(f"{BRIDGE_URL}/generate", stream=True, timeout=180,
-                      json={"target_text": text, "stream": True,
-                            "temperature": 1.0, "cfg_value": 2.0})
+    body = {"target_text": text, "stream": True}
+    if voice:
+        body["voice"] = voice
+    r = requests.post(f"{BRIDGE_URL}/generate", stream=True, timeout=180, json=body)
     r.raise_for_status()
     buf, step = b"", TTS_CHUNK_SAMPLES * 2
     for chunk in r.iter_content(chunk_size=step):
@@ -181,8 +184,8 @@ class _ASREngine:
 
 
 class _TTSEngine:
-    def synthesize_stream(self, text):
-        return _bridge_tts_stream(text)
+    def synthesize_stream(self, text, voice=None):
+        return _bridge_tts_stream(text, voice)
 
 
 # ── SmartTurn (optional) ──────────────────────────────────────────────────────

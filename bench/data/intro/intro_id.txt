@@ -1,0 +1,2 @@
+VoxWeft adalah sistem penerjemahan simultan yang berjalan sepenuhnya di chip Apple.
+Anda berbicara, ia menerjemahkan saat Anda bicara, dan tidak ada data yang keluar dari mesin ini.

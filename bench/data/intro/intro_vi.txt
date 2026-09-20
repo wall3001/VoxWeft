@@ -1,0 +1,2 @@
+VoxWeft là hệ thống phiên dịch đồng thời chạy hoàn toàn trên chip Apple.
+Bạn nói, nó dịch ngay trong lúc bạn nói, và không có gì rời khỏi chiếc máy này.

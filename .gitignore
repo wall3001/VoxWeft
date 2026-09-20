@@ -20,3 +20,5 @@ bench/relay/
 .pytest_cache/
 app/.build/
 app/*.app
+# design candidates are large and unpicked; only <lang>_<role>.wav + voices.json ship
+samples/voices/*_[0-9].wav

@@ -1,0 +1,2 @@
+VoxWeft ist ein System für Simultandolmetschen, das vollständig auf Apple-Silicon-Geräten läuft.
+Sie sprechen, es übersetzt währenddessen, und nichts verlässt jemals das Gerät.

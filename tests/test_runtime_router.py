@@ -107,14 +107,32 @@ def test_sea_to_zh_uses_llm():
     print("✓ test_sea_to_zh_uses_llm")
 
 
-def test_sea_to_sea_is_nllb_direct():
-    """SEA↔SEA 不经中文中转——两跳错误累积 + 延迟翻倍。"""
-    for s, t in [("lao_Laoo", "tha_Thai"), ("khm_Khmr", "vie_Latn"),
-                 ("mya_Mymr", "khm_Khmr"), ("tha_Thai", "lao_Laoo")]:
+def test_any_pair_is_direct_no_pivot():
+    """任意语对直译，不经中文/英文中转——两跳错误累积 + 延迟翻倍。"""
+    for s, t in [("spa_Latn", "zsm_Latn"), ("deu_Latn", "vie_Latn"),
+                 ("jpn_Jpan", "fra_Latn"), ("tha_Thai", "eng_Latn"),
+                 ("khm_Khmr", "vie_Latn")]:
         r = LR.route_translate(s, t)
-        assert r.backend == "nllb", f"{s}→{t} must be NLLB direct, got {r.backend}"
+        assert r.backend == "llm", f"{s}→{t} should be LLM direct, got {r.backend}"
         assert "direct" in r.reason
-    print("✓ test_sea_to_sea_is_nllb_direct")
+    print("✓ test_any_pair_is_direct_no_pivot")
+
+
+def test_low_resource_target_uses_dedicated_mt_from_any_source():
+    """→lo/km/my 不论源语言都走专用 MT（小 LLM 生成这些文字会蒙错）。"""
+    for s, t in [("zho_Hans", "lao_Laoo"), ("eng_Latn", "khm_Khmr"),
+                 ("tha_Thai", "mya_Mymr")]:
+        r = LR.route_translate(s, t)
+        assert r.backend == "nllb", f"{s}→{t} must be dedicated MT, got {r.backend}"
+    print("✓ test_low_resource_target_uses_dedicated_mt_from_any_source")
+
+
+def test_normalize_european_and_east_asian():
+    for src, want in {"de": "deu_Latn", "German": "deu_Latn", "德语": "deu_Latn",
+                      "es": "spa_Latn", "ja": "jpn_Jpan", "ko": "kor_Hang",
+                      "fr": "fra_Latn", "ru": "rus_Cyrl", "ar": "arb_Arab"}.items():
+        assert LR.normalize(src) == want, (src, LR.normalize(src))
+    print("✓ test_normalize_european_and_east_asian")
 
 
 def test_llm_disabled_falls_to_nllb():

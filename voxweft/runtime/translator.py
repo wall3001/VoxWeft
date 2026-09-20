@@ -28,15 +28,12 @@ LANG_ALIASES = {
     "mya_Mymr": "mya_Mymr", "tha_Thai": "tha_Thai", "vie_Latn": "vie_Latn",
 }
 
-LANG_TAG = {  # for prompting the LLM
-    "zho_Hans": "中文", "lao_Laoo": "老挝语", "khm_Khmr": "高棉语",
-    "mya_Mymr": "缅甸语", "tha_Thai": "泰语", "vie_Latn": "越南语",
-    "ind_Latn": "印尼语", "zsm_Latn": "马来语", "eng_Latn": "英语",
-}
+# For prompting the LLM. Kept in one place: router.LANG_DISPLAY.
+from voxweft.runtime.router import LANG_DISPLAY as LANG_TAG, normalize as _normalize
 
 
 def resolve_lang(code: str) -> str:
-    return LANG_ALIASES.get(code, code)
+    return _normalize(code)
 
 
 # ── 中文数字串 → 阿拉伯数字 ──────────────────────────────────────────────
@@ -497,6 +494,17 @@ class HybridTranslator:
         "lao": [(0x0E80, 0x0EFF)],
         "khm": [(0x1780, 0x17FF)],
         "mya": [(0x1000, 0x109F), (0xAA60, 0xAA7F)],
+        # Latin-script Europeans: ASCII + Latin-1/Extended-A for diacritics.
+        "deu": [(0x0041, 0x005A), (0x0061, 0x007A), (0x00C0, 0x024F)],
+        "fra": [(0x0041, 0x005A), (0x0061, 0x007A), (0x00C0, 0x024F)],
+        "spa": [(0x0041, 0x005A), (0x0061, 0x007A), (0x00C0, 0x024F)],
+        "ita": [(0x0041, 0x005A), (0x0061, 0x007A), (0x00C0, 0x024F)],
+        "por": [(0x0041, 0x005A), (0x0061, 0x007A), (0x00C0, 0x024F)],
+        "rus": [(0x0400, 0x04FF)],
+        "arb": [(0x0600, 0x06FF), (0x0750, 0x077F)],
+        # Japanese: kana + CJK ideographs. Korean: Hangul syllables + jamo.
+        "jpn": [(0x3040, 0x30FF), (0x4E00, 0x9FFF), (0x3400, 0x4DBF)],
+        "kor": [(0xAC00, 0xD7AF), (0x1100, 0x11FF), (0x3130, 0x318F)],
     }
 
     @classmethod
@@ -519,16 +527,10 @@ class HybridTranslator:
         src_is_zh = src.startswith("zho_")
         tgt_is_zh = tgt.startswith("zho_")
 
-        # 选引擎：中文沾边就按**目标语言**查表，两边都不是中文走 NLLB 直译
-        #（中转一次 zh 会把误差乘起来，而这条语向展台上不演）。
-        #
-        # 原来这里是一个全局开关 `use_llm_zh_to_lo`：名字写的是 zh→lo，
-        # 实际 gate 的是**所有** zh→非 zh，而它在 launchd 里没配、默认 0，
-        # 于是 zh→英/泰/越/印尼/马来全被打到 NLLB——这几个语向恰恰是 Qwen
-        # 明显更强的。方向判对了，漏的是「哪门语言」，所以换成查表。
-        if not src_is_zh and not tgt_is_zh:
-            use_llm = False
-        elif self._force_llm_for_nllb_langs:
+        # 选引擎：只看**目标语言**。低资源目标（lo/km/my）走专用 MT，其余
+        # 任何语对——含 es→ms、de→vi 这类不沾中英文的——都让 LLM 直译，
+        # 不经中转（两跳会把误差乘起来）。
+        if self._force_llm_for_nllb_langs:
             use_llm = True
         else:
             use_llm = not self._prefers_nllb(tgt)
@@ -573,11 +575,14 @@ class HybridTranslator:
         """
         if not res or len(res) < 2:
             return False
-        # Source leaked back into a non-zh target (CJK or SEA-script echo).
-        if src_is_zh and not tgt_is_zh:
+        # Japanese legitimately contains CJK ideographs; the "Chinese leaked
+        # into the target" checks below must not fire on it.
+        tgt_uses_cjk = tgt_is_zh or (tgt or "").startswith("jpn_")
+        # Source leaked back into a non-CJK target.
+        if src_is_zh and not tgt_uses_cjk:
             if any("一" <= ch <= "鿿" for ch in res):
                 return False
-        if not tgt_is_zh:
+        if not tgt_uses_cjk:
             # target should be predominately non-CJK; any big CJK run = leak
             cjk = sum(1 for ch in res if "一" <= ch <= "鿿")
             if cjk > max(2, len(res) * 0.05):

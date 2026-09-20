@@ -104,14 +104,32 @@ zero the CFM has no stochasticity to work with and does not converge.
 **Fix.** Leave it at the official `1.0`. Documented in `TTS-FINDINGS.md` §2.
 This knob *looks* like it treats jitter; it only makes things worse.
 
-### 2.2 There is no style-prefix syntax — everything in the text is spoken
+### 2.2 Voice design captions: measured leak, then measured no-leak
 
-An early build prepended a parenthesised voice description to the text,
-assuming the model would read it as a control token. It does not: VoxCPM2
-synthesizes whatever it is given, and the audience heard the description
-before every sentence. Proved by ASR round-trip (with prefix 4.80 s and the
-description in the transcript; without, 2.56 s), not by ear. Voice selection
-is by reference audio only; the runtime never alters synthesis text.
+VoxCPM2's documented voice-design mode puts a natural-language description
+in parentheses at the start of the text — `(A young woman, gentle voice)Hello`
+— and the description is not spoken.
+
+**What we saw on the stage build (2026-09-12).** With `(一位沉稳清晰的播音员)`
+prepended by the runtime, every utterance began with the description spoken
+aloud. ASR round-trip: 4.80 s with prefix and the words in the transcript,
+2.56 s without. We removed the prefix and wrote "the model reads everything".
+
+**What we measure now** (`scripts/design_voices.py` and a direct probe, same
+weights, current port, 2 runs each): no leak. Chinese caption, English
+caption, with a cloned reference or zero-shot — the transcript is the body
+only, and the voice follows the description well enough to build a showcase
+from it (§ Appendix, `samples/voices`).
+
+**What changed in between.** The port was rewritten (streaming decoder,
+device-side latents, tokenizer path) and the ASR used for the round-trip was
+a different model. We could not reproduce the leak on the old build because
+the box is at the venue. Root cause of the September leak: **not
+established**. What is established: on this port the mechanism works, and
+the runtime still does not add captions — voices are *designed* offline with
+a caption, the chosen sample becomes a clone reference, and synthesis text is
+never altered. That keeps the "TTS is a dumb renderer" contract regardless
+of which way the model behaves on a given build.
 
 ### ⚠️ 2.3 The "first-frame pop" — what it was and what it wasn't
 

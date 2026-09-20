@@ -99,7 +99,7 @@ WebSocket.
 pip install -e ".[runtime]"
 export VOXWEFT_MODEL_DIR=~/.voxweft/models         # VoxCPM2/, Qwen3-ASR-1.7B/, <llm>/
 export VOXWEFT_LLM_DIR=$VOXWEFT_MODEL_DIR/Qwen3-4B-Instruct-2507-4bit
-export VOXWEFT_VOICE_PROMPT_WAV=~/my_voice.wav   # ~5 s reference; pins one speaker for the session
+export VOXWEFT_VOICE_DIR=samples/voices          # <lang>_tgt.wav → the interpreter's voice per target language
 
 voxweft bridge --port 8133 &      # wait for GET /ready → 200
 voxweft serve  --port 3100        # ws://localhost:3100/ws/voice/v2
@@ -130,9 +130,10 @@ No model weights are in this repo. `docs/MODELS.md` has download notes
   0.4 s "So," is prepended to the next segment instead of silently dropped.
   Learned end-of-turn (SmartTurn v3) is wired in and **off by default** — we
   measured it net-negative for interpretation and say why.
-* **Routes by language pair.** Low-resource → zh through the LLM (where 4B
-  is strong); zh → low-resource through dedicated MT (where small LLMs
-  guess the wrong language); SEA↔SEA direct, never via Chinese.
+* **Routes by language pair, no pivot.** Any pair goes straight through the
+  LLM — es→ms, de→vi, ja→fr are one hop, never via Chinese or English.
+  Only low-resource *targets* (lo/km/my) go to dedicated MT, because a 4B
+  chat model guesses the wrong script when asked to *write* them.
 * **Keeps MLX alive under concurrency.** Thread-pinned executors, no locks
   across `yield`, warm-up through the same code path as requests. Each of
   those is a crash we had.
@@ -159,6 +160,27 @@ We do **not** publish BLEU. Translation quality is the property of the model
 you plug in; what this repo owns is that the pipeline does not lose it on
 the way: ASR-round-trip intelligibility of the TTS, first-audio latency, and
 RTF. `bench/` has the scripts.
+
+## Voices
+
+No reference recordings ship. The showcase voices are *designed*: VoxCPM2's
+caption mode (`(A mature man in his fifties, calm broadcaster voice, Castilian
+Spanish)…`) generates candidates, a human picks one per language and role,
+and the pick becomes the clone reference the bridge uses for that target
+language. Convention: source speaker = mature male, interpreter = young
+female, same text in every language — the repo's own two-sentence
+introduction.
+
+```bash
+python scripts/design_voices.py --langs zh,en,de,fr,es,ja,ko,vi,th,id,ms --n 3 --out samples/voices
+# listen, mark "pick": true in samples/voices/manifest.json, then
+python scripts/pick_voices.py samples/voices        # copies picks to <lang>_src.wav / <lang>_tgt.wav
+```
+
+`samples/voices/<lang>_src.wav` is also the microphone stand-in for demos:
+`scripts/mock_interpret.py --wav samples/voices/es_src.wav --src es --tgt ms`
+streams it through the real PTT path at real-time pace — segmenter, ASR,
+MT, TTS — with no microphone.
 
 ## The devlog is part of the product
 

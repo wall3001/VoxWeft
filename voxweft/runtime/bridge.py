@@ -105,8 +105,13 @@ _warmup_done = threading.Event()
 # 现在加载一律走 threading.Lock，预热与请求路径共用同一把。
 _tts = None
 _tts_lock = threading.Lock()
-_voice_ref_latents = None
+_voice_ref_latents = None          # the "default" voice (backwards compatible)
 _voice_external_id = "default"
+# Named voices: id → reference latents. Filled from VOXWEFT_VOICE_DIR/*.wav
+# at warm-up (id = file stem) and from POST /add_prompt. `/generate` picks
+# by `voice`; unknown/absent → default → zero-shot.
+_voices: dict = {}
+_voice_dir = os.environ.get("VOXWEFT_VOICE_DIR", "")
 _voice_prompt_wav = os.environ.get(
     "VOXWEFT_VOICE_PROMPT_WAV",
     "",
@@ -215,8 +220,11 @@ def _install_voice_prompt_sync(wav_bytes: bytes, external_id: str = "default"):
         raise ValueError(
             f"reference latent frames not patch-aligned: "
             f"frames={latents.shape[0]} patch={patch}")
-    _voice_ref_latents = latents
-    _voice_external_id = external_id or "default"
+    external_id = external_id or "default"
+    _voices[external_id] = latents
+    if external_id == "default" or _voice_ref_latents is None:
+        _voice_ref_latents = latents
+        _voice_external_id = external_id
     log.info("voice prompt installed: id=%s samples=%d (%.2fs) "
              "encoder_chunk=%d patch=%d latent_frames=%d",
              _voice_external_id, len(wav), len(wav) / 16000,
@@ -224,9 +232,32 @@ def _install_voice_prompt_sync(wav_bytes: bytes, external_id: str = "default"):
     return _voice_external_id
 
 
+def _load_voice_dir_sync():
+    """Install every <id>.wav in VOXWEFT_VOICE_DIR as a named voice."""
+    if not _voice_dir:
+        return
+    d = Path(_voice_dir).expanduser()
+    if not d.is_dir():
+        log.warning("VOXWEFT_VOICE_DIR not a directory: %s", d)
+        return
+    for wav in sorted(d.glob("*.wav")):
+        try:
+            _install_voice_prompt_sync(wav.read_bytes(), wav.stem)
+        except Exception as e:  # noqa: BLE001
+            log.warning("voice %s not installed: %s", wav.name, e)
+
+
+def _pick_voice(voice: str | None):
+    if voice and voice in _voices:
+        return _voices[voice]
+    return _voice_ref_latents
+
+
 def _load_default_voice_sync():
+    _load_voice_dir_sync()
     if not _voice_prompt_wav:
-        log.info("no VOXWEFT_VOICE_PROMPT_WAV set — zero-shot voice until /add_prompt")
+        if not _voices:
+            log.info("no VOXWEFT_VOICE_PROMPT_WAV / VOXWEFT_VOICE_DIR — zero-shot voice until /add_prompt")
         return
     path = Path(_voice_prompt_wav)
     if not path.exists():
@@ -248,6 +279,7 @@ class GenReq(BaseModel):
     target_text: str
     voice_type: str | None = None
     external_id: str | None = None
+    voice: str | None = None            # named voice from VOXWEFT_VOICE_DIR / add_prompt
     stream: bool = False
     # Defaults follow the process env so a bare {"target_text"} behaves like
     # the operator configured; an explicit value in the body wins.
@@ -278,7 +310,7 @@ async def generate(req: GenReq):
             try:
                 for chunk_f32, _ in tts.generate_streaming(
                         req.target_text,
-                        ref_latents=_voice_ref_latents,
+                        ref_latents=_pick_voice(req.voice or req.external_id),
                         temperature=req.temperature,
                         cfg_value=req.cfg_value,
                         warmup_patches=_tts_warmup_patches):
@@ -310,7 +342,7 @@ async def generate(req: GenReq):
 
     def _full():
         return tts.generate(req.target_text,
-                            ref_latents=_voice_ref_latents,
+                            ref_latents=_pick_voice(req.voice or req.external_id),
                             temperature=req.temperature,
                             cfg_value=req.cfg_value)
 
@@ -345,12 +377,10 @@ async def add_prompt(req: Request):
 @app.get("/voices")
 @app.get("/available_prompts")
 async def voices():
-    return {
-        "prompts": [{"external_id": _voice_external_id}]
-        if _voice_ref_latents is not None else [],
-        "voices": [{"external_id": _voice_external_id}]
-        if _voice_ref_latents is not None else [],
-    }
+    ids = list(_voices)
+    return {"prompts": [{"external_id": i} for i in ids],
+            "voices": [{"external_id": i} for i in ids],
+            "default": _voice_external_id if _voice_ref_latents is not None else None}
 
 
 # ---------------------------------------------------------------------------

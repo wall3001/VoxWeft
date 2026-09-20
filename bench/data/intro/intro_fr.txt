@@ -1,0 +1,2 @@
+VoxWeft est un système d'interprétation simultanée qui fonctionne entièrement sur puce Apple.
+Vous parlez, il traduit pendant que vous parlez, et rien ne quitte jamais la machine.

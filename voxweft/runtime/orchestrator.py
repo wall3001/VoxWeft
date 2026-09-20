@@ -455,7 +455,15 @@ class Orchestrator:
             t0 = time.perf_counter()
             first = None
             try:
-                for chunk in tts.synthesize_stream(spoken):
+                # Voice: the interpreter speaks in the *target* language's
+                # registered voice (VOXWEFT_VOICE_DIR/<lang>_tgt.wav), then
+                # any voice named after the role, else the bridge default.
+                voice = self.routes.voice_id(voice_role)
+                try:
+                    it = tts.synthesize_stream(spoken, voice)
+                except TypeError:          # engines that predate the voice arg
+                    it = tts.synthesize_stream(spoken)
+                for chunk in it:
                     if first is None:
                         first = (time.perf_counter() - t0) * 1000
                     self._loop.call_soon_threadsafe(

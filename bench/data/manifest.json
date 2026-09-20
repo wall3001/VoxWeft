@@ -94,5 +94,165 @@
   "ref": "We do not compete on BLEU. We make sure the pipeline loses nothing, and we wrote every mistake we made into the devlog.",
   "source": "bench/data/intro",
   "kind": "text-only"
+ },
+ {
+  "id": "intro_de_01",
+  "lang": "de",
+  "wav": null,
+  "ref": "VoxWeft ist ein System für Simultandolmetschen, das vollständig auf Apple-Silicon-Geräten läuft.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_de_02",
+  "lang": "de",
+  "wav": null,
+  "ref": "Sie sprechen, es übersetzt währenddessen, und nichts verlässt jemals das Gerät.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_fr_01",
+  "lang": "fr",
+  "wav": null,
+  "ref": "VoxWeft est un système d'interprétation simultanée qui fonctionne entièrement sur puce Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_fr_02",
+  "lang": "fr",
+  "wav": null,
+  "ref": "Vous parlez, il traduit pendant que vous parlez, et rien ne quitte jamais la machine.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_es_01",
+  "lang": "es",
+  "wav": null,
+  "ref": "VoxWeft es un sistema de interpretación simultánea que funciona por completo en chips de Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_es_02",
+  "lang": "es",
+  "wav": null,
+  "ref": "Usted habla, él traduce mientras habla, y nada sale nunca de la máquina.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_it_01",
+  "lang": "it",
+  "wav": null,
+  "ref": "VoxWeft è un sistema di interpretazione simultanea che gira interamente su chip Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_it_02",
+  "lang": "it",
+  "wav": null,
+  "ref": "Tu parli, lui traduce mentre parli, e nulla lascia mai la macchina.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_pt_01",
+  "lang": "pt",
+  "wav": null,
+  "ref": "VoxWeft é um sistema de interpretação simultânea que roda inteiramente em chips Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_pt_02",
+  "lang": "pt",
+  "wav": null,
+  "ref": "Você fala, ele traduz enquanto você fala, e nada sai da máquina.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_ja_01",
+  "lang": "ja",
+  "wav": null,
+  "ref": "VoxWeft は、Apple シリコン上で完結する同時通訳システムです。話している間に翻訳が進み、データは一切この端末の外に出ません。",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_ko_01",
+  "lang": "ko",
+  "wav": null,
+  "ref": "VoxWeft는 애플 실리콘에서 완전히 동작하는 동시통역 시스템입니다.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_ko_02",
+  "lang": "ko",
+  "wav": null,
+  "ref": "말하는 동안 번역이 진행되며, 데이터는 절대 이 기기 밖으로 나가지 않습니다.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_vi_01",
+  "lang": "vi",
+  "wav": null,
+  "ref": "VoxWeft là hệ thống phiên dịch đồng thời chạy hoàn toàn trên chip Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_vi_02",
+  "lang": "vi",
+  "wav": null,
+  "ref": "Bạn nói, nó dịch ngay trong lúc bạn nói, và không có gì rời khỏi chiếc máy này.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_th_01",
+  "lang": "th",
+  "wav": null,
+  "ref": "VoxWeft คือระบบล่ามพร้อมกันที่ทำงานทั้งหมดบนชิป Apple คุณพูด มันแปลไปพร้อมกัน และไม่มีข้อมูลใดออกจากเครื่องนี้เลย",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_id_01",
+  "lang": "id",
+  "wav": null,
+  "ref": "VoxWeft adalah sistem penerjemahan simultan yang berjalan sepenuhnya di chip Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_id_02",
+  "lang": "id",
+  "wav": null,
+  "ref": "Anda berbicara, ia menerjemahkan saat Anda bicara, dan tidak ada data yang keluar dari mesin ini.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_ms_01",
+  "lang": "ms",
+  "wav": null,
+  "ref": "VoxWeft ialah sistem terjemahan serentak yang berjalan sepenuhnya pada cip Apple.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
+ },
+ {
+  "id": "intro_ms_02",
+  "lang": "ms",
+  "wav": null,
+  "ref": "Anda bercakap, ia menterjemah semasa anda bercakap, dan tiada data keluar dari mesin ini.",
+  "source": "bench/data/intro",
+  "kind": "text-only"
  }
 ]

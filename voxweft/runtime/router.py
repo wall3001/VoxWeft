@@ -33,6 +33,15 @@ VIE = "vie_Latn"
 ENG = "eng_Latn"
 IND = "ind_Latn"
 MSA = "zsm_Latn"
+DEU = "deu_Latn"
+FRA = "fra_Latn"
+SPA = "spa_Latn"
+ITA = "ita_Latn"
+POR = "por_Latn"
+RUS = "rus_Cyrl"
+JPN = "jpn_Jpan"
+KOR = "kor_Hang"
+ARA = "arb_Arab"
 
 # 任意客户端写法 → FLORES-200
 LANG_ALIASES = {
@@ -48,12 +57,23 @@ LANG_ALIASES = {
     "en": ENG, "eng": ENG, "eng_latn": ENG, "english": ENG, "英语": ENG,
     "id": IND, "ind": IND, "ind_latn": IND, "indonesian": IND, "印尼语": IND,
     "ms": MSA, "zsm": MSA, "zsm_latn": MSA, "malay": MSA, "马来语": MSA,
+    "de": DEU, "deu": DEU, "deu_latn": DEU, "german": DEU, "德语": DEU,
+    "fr": FRA, "fra": FRA, "fra_latn": FRA, "french": FRA, "法语": FRA,
+    "es": SPA, "spa": SPA, "spa_latn": SPA, "spanish": SPA, "西班牙语": SPA,
+    "it": ITA, "ita": ITA, "ita_latn": ITA, "italian": ITA, "意大利语": ITA,
+    "pt": POR, "por": POR, "por_latn": POR, "portuguese": POR, "葡萄牙语": POR,
+    "ru": RUS, "rus": RUS, "rus_cyrl": RUS, "russian": RUS, "俄语": RUS,
+    "ja": JPN, "jpn": JPN, "jpn_jpan": JPN, "japanese": JPN, "日语": JPN,
+    "ko": KOR, "kor": KOR, "kor_hang": KOR, "korean": KOR, "韩语": KOR,
+    "ar": ARA, "arb": ARA, "arb_arab": ARA, "arabic": ARA, "阿拉伯语": ARA,
 }
 
 # 向用户展示的名字（prompt 里用）
 LANG_DISPLAY = {
     ZH: "中文", LAO: "老挝语", THA: "泰语", KHM: "高棉语", MYA: "缅甸语",
     VIE: "越南语", ENG: "英语", IND: "印尼语", MSA: "马来语",
+    DEU: "德语", FRA: "法语", SPA: "西班牙语", ITA: "意大利语", POR: "葡萄牙语",
+    RUS: "俄语", JPN: "日语", KOR: "韩语", ARA: "阿拉伯语",
 }
 
 # FLORES-200 → language name as Qwen3-ASR's `language=` expects (matched
@@ -61,13 +81,15 @@ LANG_DISPLAY = {
 FLORES_TO_NAME = {
     ZH: "Chinese", LAO: "Lao", THA: "Thai", KHM: "Khmer",
     MYA: "Burmese", VIE: "Vietnamese", ENG: "English",
-    IND: "Indonesian", MSA: "Malay",
+    IND: "Indonesian", MSA: "Malay", DEU: "German", FRA: "French",
+    SPA: "Spanish", ITA: "Italian", POR: "Portuguese", RUS: "Russian",
+    JPN: "Japanese", KOR: "Korean", ARA: "Arabic",
 }
 
 # Languages stock Qwen3-ASR (0.6B/1.7B) ships with, among the ones we route.
 # Lao / Khmer / Burmese are not in its 30 — those go to Whisper-large-v3,
 # which does have them. A fine-tune that adds them can extend this set.
-QWEN3_ASR_LANGS = {ZH, VIE, THA, ENG, IND, MSA}
+QWEN3_ASR_LANGS = {ZH, VIE, THA, ENG, IND, MSA, DEU, FRA, SPA, ITA, POR, RUS, JPN, KOR, ARA}
 
 # SEA 语系（不含中文）—— 用于判断是否走 NLLB 直译
 SEA_LANGS = {LAO, THA, KHM, MYA, VIE, IND, MSA}
@@ -136,6 +158,8 @@ def whisper_lang(code: str) -> str:
     return {
         ENG: "en", IND: "id", MSA: "ms", VIE: "vi",
         THA: "th", LAO: "lo", KHM: "km", MYA: "my", ZH: "zh",
+        DEU: "de", FRA: "fr", SPA: "es", ITA: "it", POR: "pt", RUS: "ru",
+        JPN: "ja", KOR: "ko", ARA: "ar",
     }.get(code, code)
 
 
@@ -178,11 +202,9 @@ def route_translate(src_lang: str, tgt_lang: str,
                     use_llm_zh_to_sea: bool = False) -> TranslateRoute:
     """按语言对选翻译后端。
 
-    规则（都有实测依据，见 ROUTING.md §1.2）：
-      * →老挝/高棉/缅甸：NLLB。小 LLM 生成这些低资源文字会蒙错语言。
-      * →中文 / →英泰越印尼马来：Qwen3-LLM（长句、从句明显好过 NLLB），
-        护栏失败回退 NLLB。
-      * SEA↔SEA：NLLB 直译，不经中文中转。
+    规则（都有实测依据）：
+      * →老挝/高棉/缅甸：专用 MT（NLLB / Hy-MT2）。小 LLM 生成这些低资源文字会蒙错语言。
+      * 其余任意语对：LLM **直译**，不经中文或英文中转（es→ms、de→vi 都是一跳）。
 
     `use_llm_zh_to_sea` 是现场逃生开关（VOXWEFT_USE_LLM_ZH_TO_SEA=1）：
     打开后连第一类也交给 LLM。默认关。
@@ -191,30 +213,19 @@ def route_translate(src_lang: str, tgt_lang: str,
     if src == tgt:
         return TranslateRoute("nllb", "same-lang (NLLB echo)")
 
-    s_zh, t_zh = src == ZH, tgt == ZH
-
-    # SEA ↔ SEA 直译。两跳（SEA→zh→SEA）会错误累积 + 延迟翻倍。
-    if not s_zh and not t_zh:
-        return TranslateRoute("nllb", "SEA<->SEA direct")
-
     if not use_llm_translator:
         return TranslateRoute("nllb", "LLM translator disabled")
 
-    # 按**目标语言**查表——方向是不对称的，而且这个不对称是真的：
-    #
-    #   zh→lo：要模型**生成**老挝文。4B 没有足够的老挝语料，生成时会蒙
-    #          （实测 gemma3-4b 出高棉文、Qwen3-4B 出泰文混排+循环）。→ NLLB
-    #   lo→zh：只要**看懂**老挝文、**生成中文**。生成端是 4B 的强项，
-    #          实测完整句 267-310ms 且质量好。→ LLM
-    #
-    # 原来这条是 `if s_zh and not t_zh and not use_llm_zh_to_sea`：方向判对了，
-    # 但把「哪门语言」漏了——英/泰/越/印尼/马来这些 Qwen 明显更强的目标语言，
-    # 被同一个开关一起打到 NLLB 上。一个开关同时管两类相反的语言，怎么设
-    # 都是错的，所以方向照旧、语言换成查表。
+    # 低资源目标语（lo/km/my）：小 LLM 生成这些文字会蒙错语言（实测：
+    # gemma3-4b 出高棉文、Qwen3-4B 出泰文混排+循环）。走专用 MT。
+    # 判据只看**目标**语言：lo→zh 只要看懂老挝文、生成中文，4B 强项。
     if _prefers_nllb(tgt) and not use_llm_zh_to_sea:
         return TranslateRoute("nllb", f"->{tgt} (small LLM unreliable)")
 
-    return TranslateRoute("llm", "zh involved, LLM has the prior")
+    # 其余任意语对**直译**——es→ms、de→vi、ja→fr 都不经中文或英文中转。
+    # 两跳会错误累积、延迟翻倍；4B 对这些高/中资源语言的直译实测可用。
+
+    return TranslateRoute("llm", "direct, no pivot")
 
 
 # ── TTS 路由 ────────────────────────────────────────────────────────────────
@@ -245,6 +256,15 @@ class SessionRoutes:
         self.translate = route_translate(
             self.src, self.tgt, use_llm_translator, use_llm_zh_to_sea)
         self.voice_role = voice_role or DEFAULT_VOICE
+
+    def voice_id(self, role: str | None = None) -> str:
+        """Voice to ask the bridge for. Convention: `<tgt-iso>_tgt` for the
+        interpreter (the voice that speaks the translation), `<tgt-iso>_agent`
+        for dialogue; the bridge falls back to its default when the id is not
+        installed, so this is a preference, not a requirement."""
+        iso = whisper_lang(self.tgt)
+        suffix = "agent" if (role or self.voice_role).startswith("agent") else "tgt"
+        return f"{iso}_{suffix}"
 
     def describe(self) -> str:
         return (f"{display(self.src)}→{display(self.tgt)} "
