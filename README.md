@@ -171,10 +171,19 @@ language. Convention: source speaker = mature male, interpreter = young
 female, same text in every language — the repo's own two-sentence
 introduction.
 
+22 voices ship in `samples/voices/` (11 languages × src/tgt) and are
+registered in `voxweft.db` — a single SQLite file that is the runtime's
+default configuration: voices, the intro text per language, and the showcase
+route matrix. The bridge installs every voice from it at start-up; nothing to
+configure. `python -m voxweft.db show` dumps it.
+
+To design your own:
+
 ```bash
-python scripts/design_voices.py --langs zh,en,de,fr,es,ja,ko,vi,th,id,ms --n 3 --out samples/voices
-# listen, mark "pick": true in samples/voices/manifest.json, then
-python scripts/pick_voices.py samples/voices        # copies picks to <lang>_src.wav / <lang>_tgt.wav
+python scripts/design_voices.py --langs de,fr --n 3 --out /tmp/cands
+# listen, mark "pick": true in /tmp/cands/manifest.json, then
+python scripts/pick_voices.py /tmp/cands && cp /tmp/cands/*_{src,tgt}.wav samples/voices/
+python -m voxweft.db build
 ```
 
 `samples/voices/<lang>_src.wav` is also the microphone stand-in for demos:

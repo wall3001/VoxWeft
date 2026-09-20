@@ -9,6 +9,7 @@ dist/
 models/
 *.safetensors
 *.npz
+!voxweft.db
 !tests/reference/**
 out.wav
 tts_out/

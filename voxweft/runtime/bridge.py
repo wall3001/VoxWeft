@@ -253,7 +253,30 @@ def _pick_voice(voice: str | None):
     return _voice_ref_latents
 
 
+def _load_db_voices_sync():
+    """Install the voices registered in voxweft.db (the shipped defaults).
+    Paths in the DB are repo-relative; resolve against the package root."""
+    try:
+        from voxweft import db as vdb
+        rows = vdb.voices()
+    except Exception as e:  # noqa: BLE001
+        log.info("no voxweft.db voices (%s)", e)
+        return
+    for r in rows:
+        wav = Path(r["wav"])
+        if not wav.is_absolute():
+            wav = vdb.REPO / wav
+        if not wav.exists():
+            log.warning("voice %s: %s missing", r["id"], wav)
+            continue
+        try:
+            _install_voice_prompt_sync(wav.read_bytes(), r["id"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("voice %s not installed: %s", r["id"], e)
+
+
 def _load_default_voice_sync():
+    _load_db_voices_sync()
     _load_voice_dir_sync()
     if not _voice_prompt_wav:
         if not _voices:
