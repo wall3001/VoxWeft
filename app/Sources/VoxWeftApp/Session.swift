@@ -28,11 +28,21 @@ final class Session: ObservableObject {
         var src = ""
         var out = ""
         var firstAudioMs: Int?
-        var totalMs: Int?
         var asrMs: Int?
         var mtMs: Int?
+        /// When the text reached VoxCPM2. `first audio` is measured from here,
+        /// not from the press: the wait the listener perceives as "the voice
+        /// is slow to start" begins when the TTS has something to say.
+        var ttsAt: Date?
     }
     @Published var turns: [Turn] = []
+
+    /// Which box of ASR → LLM → TTS is working right now; drives the dashboard.
+    enum Stage: Int, Comparable {
+        case idle, listening, asr, llm, tts
+        static func < (a: Stage, b: Stage) -> Bool { a.rawValue < b.rawValue }
+    }
+    @Published var stage: Stage = .idle
 
     // Live levels
     @Published var micLevel: Float = 0
@@ -43,7 +53,6 @@ final class Session: ObservableObject {
 
     private let ws = WebSocketManager()
     private let audio = AudioEngine()
-    private var turnStart: Date?
     private var configDirty = false
     private var sourcePlaying = false
     private var demoQueue: [String] = []
@@ -56,6 +65,7 @@ final class Session: ObservableObject {
         ws.onDisconnected = { [weak self] why in
             Task { @MainActor in
                 self?.connected = false; self?.status = "disconnected: \(why)"
+                self?.stage = .idle
             }
         }
         ws.onJSON = { [weak self] obj in
@@ -88,7 +98,7 @@ final class Session: ObservableObject {
     }
 
     func disconnect() {
-        ws.disconnect(); audio.stop(); connected = false; status = "idle"
+        ws.disconnect(); audio.stop(); connected = false; status = "idle"; stage = .idle
     }
 
     private func pushConfig() {
@@ -108,20 +118,21 @@ final class Session: ObservableObject {
         guard connected, !recording else { return }
         audio.stopPlayback()
         recording = true
+        stage = .listening
         ws.sendJSON(["type": "ptt_start"])
     }
 
     func pttUp() {
         guard recording else { return }
         recording = false
+        stage = .asr
         ws.sendJSON(["type": "ptt_end"])
-        // Latency clock starts at release: that is when the user is waiting.
-        turnStart = Date()
         if configDirty { pushConfig() }
     }
 
     func interrupt() {
         audio.stopPlayback()
+        stage = .idle
         ws.sendJSON(["type": "interrupt", "reason": "user"])
     }
 
@@ -148,7 +159,7 @@ final class Session: ObservableObject {
     private func sendNextDemoLine() {
         guard !demoQueue.isEmpty else { status = "connected"; return }
         let line = demoQueue.removeFirst()
-        turnStart = Date()
+        stage = .llm
         turns.append(Turn(src: line))
         ws.sendJSON(["type": "text_input", "text": line])
     }
@@ -163,38 +174,56 @@ final class Session: ObservableObject {
         case "session_config_ack":
             routes = obj["routes"] as? String ?? ""
         case "segment_committed":
-            if turnStart == nil { turnStart = Date() }
+            stage = .asr
             turns.append(Turn(seq: (obj["seq"] as? NSNumber)?.intValue ?? 0))
         case "asr":
             let i = turnIndex(for: obj)
             turns[i].src = obj["text"] as? String ?? ""
             turns[i].asrMs = (obj["latency_ms"] as? NSNumber)?.intValue
+            stage = .llm
         case "translation", "llm":
             let i = turnIndex(for: obj)
             turns[i].out = obj["text"] as? String ?? ""
             turns[i].mtMs = (obj["latency_ms"] as? NSNumber)?.intValue
+            // The server hands this same text to the TTS on the next line, so
+            // its arrival is the closest the client can stand to "VoxCPM2 got
+            // the text" — and that is what `first audio` is measured against.
+            if turns[i].ttsAt == nil { turns[i].ttsAt = Date() }
+            stage = .tts
         case "llm_sentence":
             let i = turnIndex(for: obj)
             turns[i].out += obj["text"] as? String ?? ""
+            if turns[i].ttsAt == nil { turns[i].ttsAt = Date() }
+            stage = .tts
+        case "state":
+            switch obj["state"] as? String {
+            case "thinking": stage = .llm
+            case "speaking": stage = .tts
+            case "idle": stage = .idle
+            default: break
+            }
         case "source_audio":
-            // Demo: the source line is being read aloud first. Restart the
-            // latency clock when it finishes so "first audio" measures the
-            // interpretation, not the read-out.
+            // Demo: the source line is read aloud first. It is TTS work, but
+            // not the turn being timed — `ttsAt` is still unset here.
             sourcePlaying = true
+            stage = .tts
         case "audio_end":
             audio.endOfUtterance()
-            if sourcePlaying { sourcePlaying = false; turnStart = Date() }
+            sourcePlaying = false
         case "audio_start":
+            stage = .tts
             if sourcePlaying { break }
             let i = turnIndex(for: obj)
-            if let t = turnStart, turns[i].firstAudioMs == nil {
+            guard turns[i].firstAudioMs == nil else { break }
+            if let t = turns[i].ttsAt {
                 turns[i].firstAudioMs = Int(Date().timeIntervalSince(t) * 1000)
+            } else if let ms = (obj["tts_latency_ms"] as? NSNumber)?.intValue {
+                // `speak` turns carry no translation event; take the server's
+                // own text-to-first-chunk measurement instead.
+                turns[i].firstAudioMs = ms
             }
         case "turn_end":
-            if let t = turnStart, !turns.isEmpty {
-                turns[turns.count - 1].totalMs = Int(Date().timeIntervalSince(t) * 1000)
-            }
-            turnStart = nil
+            stage = .idle
             if !demoQueue.isEmpty {
                 // Give playback a beat to drain before the next line.
                 demoTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: false) { [weak self] _ in
@@ -205,10 +234,13 @@ final class Session: ObservableObject {
             let quiet = (obj["too_quiet"] as? Bool) ?? false
             lastError = quiet ? "too quiet (peak \(obj["peak_rms"] ?? "?") < \(obj["threshold"] ?? "?"))"
                               : "no speech detected"
+            stage = .idle
         case "interrupted":
             audio.stopPlayback()
+            stage = .idle
         case "error":
             lastError = "\(obj["stage"] ?? ""): \(obj["message"] ?? "")"
+            stage = .idle
         default:
             break
         }
@@ -227,7 +259,8 @@ final class Session: ObservableObject {
     }
 
     private func handleAudio(_ data: Data) {
-        if !sourcePlaying, let t = turnStart, !turns.isEmpty, turns[turns.count - 1].firstAudioMs == nil {
+        if !sourcePlaying, !turns.isEmpty, turns[turns.count - 1].firstAudioMs == nil,
+           let t = turns[turns.count - 1].ttsAt {
             turns[turns.count - 1].firstAudioMs = Int(Date().timeIntervalSince(t) * 1000)
         }
         audio.play(data, sampleRate: 48000)

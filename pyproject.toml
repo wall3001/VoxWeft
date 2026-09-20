@@ -16,10 +16,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/OpenBMB/VoxWeft"
-Repository = "https://github.com/OpenBMB/VoxWeft"
-Issues = "https://github.com/OpenBMB/VoxWeft/issues"
-Devlog = "https://github.com/OpenBMB/VoxWeft/blob/main/docs/DEVLOG.md"
+Homepage = "https://github.com/HenryZ838978/VoxWeft"
+Repository = "https://github.com/HenryZ838978/VoxWeft"
+Issues = "https://github.com/HenryZ838978/VoxWeft/issues"
+Devlog = "https://github.com/HenryZ838978/VoxWeft/blob/main/docs/DEVLOG.md"
 
 [project.optional-dependencies]
 # L2 runtime: bridge (TTS+ASR HTTP) + WebSocket server + MLX LLM/ASR adapters.

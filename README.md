@@ -1,26 +1,48 @@
-# VoxWeft
+<p align="center">
+  <img src="docs/media/logo.png" width="128" alt="VoxWeft">
+</p>
 
-![VoxWeft — voice cloning on Apple Silicon](docs/banner.png)
+<h1 align="center">VoxWeft</h1>
 
-**On-device simultaneous interpretation and voice dialogue on Apple Silicon.
-Speech in, translated speech out, streaming, nothing leaves the machine.**
+<p align="center">
+  <b>On-device simultaneous interpretation on Apple Silicon.</b><br>
+  Speech in, translated speech out, streaming — nothing leaves the machine.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-2ea44f"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Apple%20Silicon-black?logo=apple">
+  <img alt="Framework" src="https://img.shields.io/badge/inference-MLX-29F5C2">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white">
+  <img alt="TTS" src="https://img.shields.io/badge/TTS-VoxCPM2-FA9E5C">
+  <img alt="Cloud" src="https://img.shields.io/badge/cloud-0%20bytes-critical">
+</p>
+
+<p align="center">
+  <img src="docs/media/demo.gif" width="880" alt="VoxWeft interpreting English to French on an M5 MacBook — ASR → LLM → TTS lights up as each stage works; first audio 582 ms">
+</p>
+
+<p align="center"><sub>English → French on a MacBook (M5), no microphone: each line is read in a designed source voice, then interpreted into the target voice. The dashboard glows with whichever model is working. Full clip: <a href="docs/media/showcase.mp4">docs/media/showcase.mp4</a> (70 s, 1.6 MB).</sub></p>
+
+---
 
 At the core is our port of [VoxCPM2](https://github.com/OpenBMB/VoxCPM) —
 a 2B tokenizer-free TTS covering 30 languages — to [MLX](https://github.com/ml-explore/mlx):
 zero weight conversion for the LM, bit-exact AudioVAE, a **stateful streaming
-decoder** that gets first audio out in ~0.3–0.4 s on a base M2 and ~150 ms
-on M3 Ultra, voice cloning from ~5 s of reference audio, 4-bit
+decoder** that gets first audio out in ~170 ms on an M5, ~300 ms on a base M2,
+~150 ms on M3 Ultra; voice cloning from ~5 s of reference audio; 4-bit
 quantization. Verified module-by-module against the official PyTorch
 implementation.
 
 Around it: a runtime that turns a microphone into segmented, translated,
-spoken output while the speaker is still talking.
+spoken output while the speaker is still talking — and a macOS shell that
+shows you which model is working, and how long each step took.
 
 There is no PyPI or npm package, on purpose: the source is the distribution.
 Clone, install editable, point your agent at the clone.
 
 ```bash
-git clone https://github.com/OpenBMB/VoxWeft && cd VoxWeft
+git clone https://github.com/HenryZ838978/VoxWeft && cd VoxWeft
 python -m venv .venv && source .venv/bin/activate
 pip install -e .              # L1: TTS, clone, `voxweft say`
 pip install -e ".[mcp]"       # + MCP server for agent harnesses
@@ -57,8 +79,14 @@ plug them in, but you download the weights. Everything runs on MLX; we do not
 support Ollama or other CPU-first runtimes because they cannot hit the
 latency budget on this hardware.
 
-**L3 is whatever fits.** CLI, MCP, and a ~500-line SwiftUI shell in `app/`
-with hold-to-talk, latency chips and a mic-free demo. Disposable by design.
+**L3 is whatever fits.** CLI, MCP, and a ~700-line SwiftUI shell in `app/`
+with hold-to-talk, a live ASR → LLM → TTS dashboard, per-turn latency chips
+and a mic-free demo. Disposable by design.
+
+<p align="center">
+  <img src="docs/media/app-interpreter.jpg" width="880" alt="VoxWeft macOS shell: three interpreted turns with mt / first-audio chips">
+</p>
+<p align="center"><sub>Each card is one segment: source line, interpretation, and what it cost — <code>mt</code> is the LLM, <code>first audio</code> is measured from the moment the text reached VoxCPM2 to the first sample the speaker played.</sub></p>
 
 ## Quick start — L1
 
@@ -152,20 +180,21 @@ and stray Python killed first — with them resident the same pipeline was
 3–4× slower and free memory was ~100 MB). M3 Ultra figures from the stage
 build.
 
-| stage, in isolation | M2 16 GB | M3 Ultra |
-|---|---|---|
-| VoxCPM2 4-bit TTS, first audio (warm) | 303 ms | 124–168 ms |
-| VoxCPM2 4-bit TTS, RTF | **1.47** | ≈ 0.2 |
-| Qwen3-ASR-1.7B 8-bit, 10 s clip | 1.2 s (RTF 0.11) · bf16: RTF 0.24 | — |
-| Qwen3-4B 4-bit, one sentence zh→en | first token 405 ms · 16 tok in 870 ms | — |
-| resident memory, all three | **6.7 GB** (bf16 ASR: 8.5) | — |
+| stage, in isolation | M2 16 GB | M5 16 GB (MacBook) | M3 Ultra |
+|---|---|---|---|
+| VoxCPM2 4-bit TTS, first audio (warm) | 303 ms | **169 ms** | 124–168 ms |
+| VoxCPM2 4-bit TTS, RTF | **1.47** | 0.94 (with a full desktop session running) | ≈ 0.2 |
+| Qwen3-ASR-1.7B 8-bit, 10 s clip | 1.2 s (RTF 0.11) · bf16: RTF 0.24 | — | — |
+| Qwen3-4B 4-bit, one sentence zh→en | first token 405 ms · 16 tok in 870 ms | — | — |
+| resident memory, all three | **6.7 GB** (bf16 ASR: 8.5) | 6.7 GB | — |
 
-| end to end, `/ws/voice/v2`, designed source voice as microphone | M2 16 GB | M3 Ultra |
-|---|---|---|
-| segment commit → first interpreted audio (worker idle) | ≈ 2.5 s | ≈ 0.85 s |
-| per-segment wall time, 5 s of speech out | ≈ 7 s | ≈ 1.5 s |
-| TTS ASR-round-trip CER, repo intro zh / en | 3.4% / 7.8% | |
-| segmenter, phone mic, ASR CER fixed→adaptive threshold | 16.3% → 10% | |
+| end to end, `/ws/voice/v2` | M2 16 GB | M5 16 GB | M3 Ultra |
+|---|---|---|---|
+| text → LLM → first interpreted audio, per sentence (the clip above, en→fr) | — | **0.58 / 2.4 / 1.3 s** | — |
+| segment commit → first interpreted audio (worker idle) | ≈ 2.5 s | — | ≈ 0.85 s |
+| per-segment wall time, 5 s of speech out | ≈ 7 s | ≈ 5 s | ≈ 1.5 s |
+| TTS ASR-round-trip CER, repo intro zh / en | 3.4% / 7.8% | | |
+| segmenter, phone mic, ASR CER fixed→adaptive threshold | 16.3% → 10% | | |
 
 On the M2 the pipeline is **TTS-bound**: RTF 1.47 means 5 s of speech takes
 7 s to produce, and the serial worker makes the next segment wait. ASR and
@@ -219,6 +248,8 @@ endpointer that made interpretation worse. A working demo can be
 regenerated by any model; this list cannot.
 
 ## Layout
+
+<p align="center"><img src="docs/media/dashboard-idle.jpg" width="560" alt="ASR → LLM → TTS dashboard, idle"></p>
 
 ```
 voxweft/
