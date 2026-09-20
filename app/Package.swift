@@ -12,7 +12,7 @@ let package = Package(
         .executableTarget(
             name: "VoxWeftApp",
             path: "Sources/VoxWeftApp",
-            resources: [.copy("intro")]
+            resources: [.copy("intro"), .copy("../../Resources/logo.png"), .copy("../../Resources/logo@2x.png")]
         )
     ]
 )

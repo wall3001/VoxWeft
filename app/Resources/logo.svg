@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VoxWeft — 织
+
+  意象：两股线彼此穿插编织，而不是交叉成 X。
+  经线（warp）是各自固定的语言（密排的竖线），
+  纬线（weft）是横穿它们的那根线（暖色丝线）。
+
+  为什么不做「两条斜线交叉」：实测小尺寸下会被读成关闭按钮的 ✕，
+  轮廓没有歧义可言。编织的穿插关系在轮廓上就是波浪，不会被误读。
+
+  色彩分工：经线用冷色（代表既有的、各自独立的语言系统），
+  纬线用暖色（代表「横穿」这个动作本身）。冷暖对比让动作一眼可见。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%"   stop-color="#151D31"/>
+      <stop offset="100%" stop-color="#0A0E18"/>
+    </linearGradient>
+
+    <!-- 经线：下暗上亮，像是被顶光扫到，给平面图形一点纵深。
+         必须用 userSpaceOnUse —— 默认的 objectBoundingBox 对垂直 line
+         的包围盒宽度为零，渐变会退化，整条线渲染不出来（实测踩过）。 -->
+    <linearGradient id="warpGrad" gradientUnits="userSpaceOnUse"
+                    x1="0" y1="416" x2="0" y2="88">
+      <stop offset="0%"   stop-color="#2C6FB5"/>
+      <stop offset="100%" stop-color="#7FD4F7"/>
+    </linearGradient>
+
+    <!-- 纬线：暖金，中段最亮，两端略沉 -->
+    <linearGradient id="weftGrad" gradientUnits="userSpaceOnUse"
+                    x1="34" y1="0" x2="486" y2="0">
+      <stop offset="0%"   stop-color="#F0863A"/>
+      <stop offset="50%"  stop-color="#FFC27A"/>
+      <stop offset="100%" stop-color="#F0863A"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%"   stop-color="#FFD9A8" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#FFD9A8" stop-opacity="0"/>
+    </radialGradient>
+
+    <clipPath id="rounded">
+      <rect width="512" height="512" rx="114" ry="114"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#rounded)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+
+    <!-- 经线：五根竖线，顶端高度参差（等长会像表格，不是织物），
+         底线齐平——底边是「布边」，视觉上有一个稳定的基准。 -->
+    <g stroke="url(#warpGrad)" stroke-width="26" stroke-linecap="round"
+       fill="none" opacity="0.92">
+      <line x1="128" y1="104" x2="128" y2="416"/>
+      <line x1="192" y1="140" x2="192" y2="416"/>
+      <line x1="256" y1="104" x2="256" y2="416"/>
+      <line x1="320" y1="140" x2="320" y2="416"/>
+      <line x1="384" y1="104" x2="384" y2="416"/>
+    </g>
+
+    <!-- 纬线：一根丝线横穿。波浪的谷底落在经线之间，读起来就是
+         「从中间穿过去」。
+
+         画两层：先一条深色粗线垫底（把丝线从同样偏蓝的经线里「托」出来），
+         再叠上暖色细线。顺序不能反——先渐变后描边会把丝线盖掉。 -->
+    <circle cx="270" cy="270" r="160" fill="url(#glow)"/>
+    <path d="M 34 302 C 100 224, 156 224, 222 302
+             C 288 380, 344 380, 410 302
+             C 440 268, 466 252, 486 248"
+          fill="none" stroke="#0A0E18" stroke-width="48"
+          stroke-linecap="round"/>
+    <path d="M 34 302 C 100 224, 156 224, 222 302
+             C 288 380, 344 380, 410 302
+             C 440 268, 466 252, 486 248"
+          fill="none" stroke="url(#weftGrad)" stroke-width="32"
+          stroke-linecap="round"/>
+
+    <!-- 线头：让「穿过去」有个终点，而不是断在边上 -->
+    <circle cx="486" cy="248" r="15" fill="#FFD9A8"/>
+  </g>
+</svg>

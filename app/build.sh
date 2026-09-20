@@ -12,6 +12,8 @@ swiftc -O -parse-as-library -target arm64-apple-macosx14.0 \
   -framework SwiftUI -framework AVFoundation -framework Accelerate \
   Sources/VoxWeftApp/*.swift -o "$APP/Contents/MacOS/VoxWeftApp"
 cp Sources/VoxWeftApp/intro/*.txt "$APP/Contents/Resources/intro/"
+cp Resources/logo.png Resources/logo@2x.png "$APP/Contents/Resources/"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -19,6 +21,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>VoxWeft</string>
   <key>CFBundleIdentifier</key><string>ai.openbmb.voxweft</string>
   <key>CFBundleExecutable</key><string>VoxWeftApp</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
