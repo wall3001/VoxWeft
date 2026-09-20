@@ -262,9 +262,13 @@ class SessionRoutes:
         interpreter (the voice that speaks the translation), `<tgt-iso>_agent`
         for dialogue; the bridge falls back to its default when the id is not
         installed, so this is a preference, not a requirement."""
-        iso = whisper_lang(self.tgt)
-        suffix = "agent" if (role or self.voice_role).startswith("agent") else "tgt"
-        return f"{iso}_{suffix}"
+        r = role or self.voice_role
+        if r == "source":
+            # Mic-free demo: the *source* text read aloud in the source
+            # language's designed speaker voice, before the interpretation.
+            return f"{whisper_lang(self.src)}_src"
+        suffix = "agent" if r.startswith("agent") else "tgt"
+        return f"{whisper_lang(self.tgt)}_{suffix}"
 
     def describe(self) -> str:
         return (f"{display(self.src)}→{display(self.tgt)} "

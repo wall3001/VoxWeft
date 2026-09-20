@@ -462,7 +462,9 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
             elif mt == "text_input":
                 txt = (obj.get("text") or "").strip()
                 if txt:
-                    asyncio.ensure_future(_text_turn(state["orch"], txt, send_json))
+                    asyncio.ensure_future(_text_turn(
+                        state["orch"], txt, send_json,
+                        speak_source=bool(obj.get("speak_source", True))))
 
             elif mt == "speak":
                 # Client fallback: render given text directly, skipping ASR and MT.
@@ -497,7 +499,7 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
         slog.info("session closed")
 
 
-async def _text_turn(orch, text: str, send_json):
+async def _text_turn(orch, text: str, send_json, speak_source: bool = True):
     """text_input: skip ASR. Interpreter ⇒ MT ⇒ TTS; agent ⇒ LLM ⇒ TTS."""
     try:
         if orch.mode == "agent":
@@ -522,6 +524,14 @@ async def _text_turn(orch, text: str, send_json):
             await send_json({"type": "llm", "text": full, "sentences": n})
             await orch.send_json({"type": "turn_end", "sentences": n, "total_ms": 0})
         else:
+            # Demo semantics for text input: speak the source line in the
+            # source-language voice (the "speaker"), then translate and speak
+            # it in the target voice (the "interpreter"). A microphone session
+            # has a real speaker and skips the first half. The client can
+            # opt out with speak_source=false.
+            if speak_source:
+                await send_json({"type": "source_audio", "seq": 0, "text": text})
+                await orch._synth_and_send(0, text, "source")
             tr = await orch._run_blocking(orch.engines["translate"].translate,
                                           text, orch.routes.src, orch.routes.tgt)
             await send_json({"type": "translation", "seq": 0, "src": text,

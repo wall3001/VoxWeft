@@ -39,11 +39,13 @@ final class Session: ObservableObject {
     @Published var speakerLevel: Float = 0
     @Published var recording = false
     @Published var lastError = ""
+    @Published var audioNote = ""
 
     private let ws = WebSocketManager()
     private let audio = AudioEngine()
     private var turnStart: Date?
     private var configDirty = false
+    private var sourcePlaying = false
     private var demoQueue: [String] = []
     private var demoTimer: Timer?
 
@@ -77,7 +79,12 @@ final class Session: ObservableObject {
         UserDefaults.standard.set(serverURL, forKey: "serverURL")
         status = "connecting…"
         ws.connect(to: serverURL)
-        do { try audio.start() } catch { lastError = error.localizedDescription }
+        do {
+            try audio.start()
+            audioNote = audio.voiceProcessing ? "" : "echo cancellation off (mic array unsupported) — use headphones or keep the volume low"
+        } catch {
+            lastError = "audio: \(error.localizedDescription)"
+        }
     }
 
     func disconnect() {
@@ -164,7 +171,15 @@ final class Session: ObservableObject {
         case "llm_sentence":
             let i = turnIndex(for: obj)
             turns[i].out += obj["text"] as? String ?? ""
+        case "source_audio":
+            // Demo: the source line is being read aloud first. Restart the
+            // latency clock when it finishes so "first audio" measures the
+            // interpretation, not the read-out.
+            sourcePlaying = true
+        case "audio_end":
+            if sourcePlaying { sourcePlaying = false; turnStart = Date() }
         case "audio_start":
+            if sourcePlaying { break }
             let i = turnIndex(for: obj)
             if let t = turnStart, turns[i].firstAudioMs == nil {
                 turns[i].firstAudioMs = Int(Date().timeIntervalSince(t) * 1000)
@@ -206,7 +221,7 @@ final class Session: ObservableObject {
     }
 
     private func handleAudio(_ data: Data) {
-        if let t = turnStart, !turns.isEmpty, turns[turns.count - 1].firstAudioMs == nil {
+        if !sourcePlaying, let t = turnStart, !turns.isEmpty, turns[turns.count - 1].firstAudioMs == nil {
             turns[turns.count - 1].firstAudioMs = Int(Date().timeIntervalSince(t) * 1000)
         }
         audio.play(data, sampleRate: 48000)

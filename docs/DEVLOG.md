@@ -476,13 +476,24 @@ compiler". Nothing in the project is at fault; the CLT install is internally
 inconsistent. `app/build.sh` exists so a `swiftc`-only path is available, but
 if you see those two errors, reinstall CLT or use a machine with Xcode.
 
-### 7.6 Health probes: `/health` ≠ `/ready`
+### 7.6 `setVoiceProcessingEnabled(true)` can make the whole engine fail to start
+
+On a MacBook Pro whose built-in mic array reports 3 input channels, enabling
+voice processing reshapes the input to 7 channels and `AVAudioEngine.start()`
+fails with `-10875` at `kAUInitialize` on the *output* unit — so neither
+capture nor playback works, and the only visible symptom is an empty level
+meter and silence. Works fine on the M3 Ultra's 1-channel input. The app now
+tries with VP, and on failure rebuilds the engine without it (no AEC, so
+headphones). Reproduced with a 15-line standalone probe; the first
+diagnosis ("TCC denied the mic") was wrong — TCC had granted it.
+
+### 7.7 Health probes: `/health` ≠ `/ready`
 
 `/health` is "process alive" and is true during the 1.7 s cold start;
 `/ready` is "models loaded and warmed". Watchdogs and client start-up
 checks must probe `/ready`, or users eat the cold start.
 
-### 7.7 Non-daemon executor threads make restarts slow
+### 7.8 Non-daemon executor threads make restarts slow
 
 `ThreadPoolExecutor` threads are non-daemon; without an explicit
 `shutdown(wait=False, cancel_futures=True)` on process exit, launchd

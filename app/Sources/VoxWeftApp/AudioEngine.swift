@@ -13,7 +13,7 @@ final class AudioEngine {
     static let micSampleRate: Double = 16000
     static let chunkSamples = 512              // 32ms @16kHz — 与服务端 FRAME_S 对齐
 
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var player = AVAudioPlayerNode()
     private var converter: AVAudioConverter?
 
@@ -50,14 +50,31 @@ final class AudioEngine {
 
     func start() throws {
         guard !isRunning else { return }
+        // Voice processing (system AEC) is what makes speaker + mic in one
+        // room work. It is not universally available: on a MacBook Pro whose
+        // built-in array reports 3 input channels, enabling VP turns the
+        // input into 7 channels and the engine's output unit then fails to
+        // initialize (-10875). Try with VP first; if start() fails, rebuild
+        // the engine without it. Playback is more important than AEC.
+        do {
+            try startEngine(voiceProcessing: true)
+        } catch {
+            NSLog("AudioEngine: start with voice processing failed (%@); retrying without", "\(error)")
+            try startEngine(voiceProcessing: false)
+        }
+    }
 
+    private(set) var voiceProcessing = false
+
+    private func startEngine(voiceProcessing vp: Bool) throws {
+        // A fresh engine each attempt: setVoiceProcessingEnabled cannot be
+        // toggled back reliably on a configured graph.
+        engine = AVAudioEngine()
+        player = AVAudioPlayerNode()
         let input = engine.inputNode
 
-        // AEC：必须在读取格式/安装 tap 之前开。开启后硬件格式会变
-        // （通常是 48k 单声道），所以格式要在开启之后重新取。
-        try? input.setVoiceProcessingEnabled(true)
+        if vp { try input.setVoiceProcessingEnabled(true) }
         let hwFormat = input.outputFormat(forBus: 0)
-
         guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
             throw AudioError.noInputDevice
         }
@@ -74,8 +91,14 @@ final class AudioEngine {
         }
 
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
+        }
         player.play()
+        voiceProcessing = vp
         isRunning = true
     }
 

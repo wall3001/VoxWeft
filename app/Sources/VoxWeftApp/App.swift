@@ -114,8 +114,8 @@ struct ContentView: View {
             Group {
                 Text("Mode").font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    Chip(text: "Interpreter", active: s.mode == "interpreter").tappable { s.mode = "interpreter" }
-                    Chip(text: "Dialogue", active: s.mode == "agent").tappable { s.mode = "agent" }
+                    Chip(text: "Interpreter", active: s.mode == "interpreter").tappable { s.mode = "interpreter"; s.turns.removeAll() }
+                    Chip(text: "Dialogue", active: s.mode == "agent").tappable { s.mode = "agent"; s.turns.removeAll() }
                 }
             }
             Group {
@@ -143,6 +143,10 @@ struct ContentView: View {
                 Chip(text: "■ Stop").tappable { s.stopIntro(); s.interrupt() }
             }
             Spacer()
+            if !s.audioNote.isEmpty {
+                Text(s.audioNote).font(.system(size: 12)).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if !s.lastError.isEmpty {
                 Text(s.lastError).font(.system(size: 12)).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
