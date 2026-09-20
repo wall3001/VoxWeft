@@ -143,18 +143,31 @@ No model weights are in this repo. `docs/MODELS.md` has download notes
 
 ## Numbers
 
-| | M2 16 GB | M3 Ultra |
-|---|---|---|
-| TTS first audio, streaming, warm | 304 ms (zero-shot) · 403 ms (clone) | 124–168 ms |
-| TTS RTF (4-bit, 6 steps) | 1.48 | ≈ 0.2 |
-| ASR → MT → first TTS chunk, per segment | — | ≈ 0.85 s |
-| text → MT (Qwen3-4B) → first TTS chunk, per sentence | 2.35 s median | — |
-| TTS ASR-round-trip CER on the repo intro (zh / en) | 3.4% / 7.8% | |
-| Segmenter, phone mic, ASR CER fixed→adaptive threshold | 16.3% → 10% | |
+Measured on a base **M2 16 GB** with nothing else running (Lark, VPN helpers
+and stray Python killed first — with them resident the same pipeline was
+3–4× slower and free memory was ~100 MB). M3 Ultra figures from the stage
+build.
 
-RTF 1.48 means a base M2 produces audio slower than it plays — the streaming
-path will stutter there, and that is the silicon (upstream measures the
-same). Read `docs/HARDWARE.md` before choosing a machine.
+| stage, in isolation | M2 16 GB | M3 Ultra |
+|---|---|---|
+| VoxCPM2 4-bit TTS, first audio (warm) | 303 ms | 124–168 ms |
+| VoxCPM2 4-bit TTS, RTF | **1.47** | ≈ 0.2 |
+| Qwen3-ASR-1.7B, 4 s segment | 950 ms (RTF 0.24) | — |
+| Qwen3-4B 4-bit, one sentence zh→en | first token 405 ms · 16 tok in 870 ms | — |
+| resident memory, all three | 8.5 GB | — |
+
+| end to end, `/ws/voice/v2`, designed source voice as microphone | M2 16 GB | M3 Ultra |
+|---|---|---|
+| segment commit → first interpreted audio (worker idle) | ≈ 2.5 s | ≈ 0.85 s |
+| per-segment wall time, 5 s of speech out | ≈ 7 s | ≈ 1.5 s |
+| TTS ASR-round-trip CER, repo intro zh / en | 3.4% / 7.8% | |
+| segmenter, phone mic, ASR CER fixed→adaptive threshold | 16.3% → 10% | |
+
+On the M2 the pipeline is **TTS-bound**: RTF 1.47 means 5 s of speech takes
+7 s to produce, and the serial worker makes the next segment wait. ASR and
+the LLM together are ~1.5 s and would keep up with real time; the TTS is the
+silicon ceiling (upstream measures the same RTF). On M3 Ultra all three are
+under real time and the pipeline streams.
 
 We do **not** publish BLEU. Translation quality is the property of the model
 you plug in; what this repo owns is that the pipeline does not lose it on

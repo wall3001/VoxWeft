@@ -23,3 +23,14 @@ configure is loaded at warm-up.
 
 * Intel Macs, Linux, Windows — MLX only.
 * Ollama / llama.cpp as the LLM backend — latency budget does not close.
+
+## Measuring on a shared machine
+
+Numbers taken while other software is resident are not numbers. On the 16 GB
+M2 the pipeline needs ~8.5 GB for its three models; with a chat client and
+a VPN helper holding another 2 GB the unified memory thrashed, free fell to
+~100 MB, and every stage was 3–4× slower with nothing in the logs to say
+why. Kill everything you can (`pkill` the chat apps, check `vm_stat` shows
+several GB free) before trusting any latency figure, and check that no
+earlier run is still draining its queue — a serial worker will happily keep
+transcribing whatever is left over, which looks like hallucination.

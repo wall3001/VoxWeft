@@ -501,6 +501,18 @@ checks must probe `/ready`, or users eat the cold start.
 
 ---
 
+### 7.9 The 6–14 s that were not ours
+
+First E2E on the M2 dev box: 6–14 s from segment commit to first audio.
+Bare models, same box, minutes later: ASR 0.95 s + LLM 0.87 s + TTS 0.3 s
+≈ 2.1 s. The difference was the machine — Lark (1.2 GB), a VPN client
+(0.8 GB), two leftover Python processes, and our own previous run still
+draining its serial queue and transcribing the silence after the clip
+("Oh." "Shh." — ASR hallucination on tail noise, not a bug in the clip).
+Free memory was 100 MB. After `pkill`: 9.8 GB free, 2.5 s commit-to-audio.
+Rule: `vm_stat` before every latency claim; kill the previous run before the
+next one.
+
 ## 8. Measurement mistakes we made (so you don't)
 
 * Concluding from 7 samples (§5.1).
@@ -509,6 +521,7 @@ checks must probe `/ready`, or users eat the cold start.
 * Checking deployment with `strings | grep` on UTF-8 (§7.1).
 * Attributing a crash to the most visible frame in the stack (§7.2).
 * Attributing a deadlock to the input that happened to trigger it (§1.2).
+* Reporting E2E latency from a machine with 100 MB free and a previous run still draining (§7.9).
 
 ---
 
