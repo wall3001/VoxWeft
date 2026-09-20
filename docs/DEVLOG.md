@@ -493,7 +493,41 @@ diagnosis ("TCC denied the mic") was wrong — TCC had granted it.
 `/ready` is "models loaded and warmed". Watchdogs and client start-up
 checks must probe `/ready`, or users eat the cold start.
 
-### 7.8 Non-daemon executor threads make restarts slow
+### 7.8 An interrupt that reached nothing
+
+Stop button "did nothing": audio kept playing, and the next sentence waited
+~20 s. Four layers each dropped the ball:
+
+1. `interrupt()` set a cancel `Event` and immediately replaced it with a
+   fresh one; the consumer, parked on the next chunk, only ever saw the new
+   unset Event. → generation counter compared per chunk.
+2. Text turns ran as untracked `ensure_future` tasks outside the worker. →
+   tracked in `_side_tasks`, cancelled on interrupt.
+3. Cancellation raised `CancelledError` at `await aq.get()`, skipping the
+   cut branch entirely, so the producer thread and its HTTP stream lived on.
+   → `except CancelledError: abort()` around the consumer.
+4. `requests.Response.close()` on a half-read stream returns the connection
+   to the pool; the socket stays open and the bridge never learns. And the
+   bridge's own generator sat in `await aq.get()` between 300 ms patches, so
+   even a real close was noticed one patch late while the single TTS thread
+   finished the whole sentence. → shut the raw socket; bridge polls
+   `request.is_disconnected()` at 100 ms and sets a stop flag the producer
+   checks per patch.
+
+Measured: next sentence after interrupt 19.9 s → 1.2 s on M2.
+
+### 7.9 Playback stutter that was not a sample-rate problem
+
+Fine-grained choppiness on M2 playback ("like the sample rate is wrong"):
+formats matched (48 kHz mono float both sides). The server produces at RTF
+1.47, i.e. a 200 ms chunk every ~300 ms; the player drained each chunk and
+sat silent ~100 ms until the next — a gap five times a second. Fix in the
+client: 0.6 s pre-roll before starting, and drop back into buffering
+whenever the scheduled queue runs dry, so a slow producer costs one pause
+per utterance instead of a stutter per chunk. On real-time hardware the
+pre-roll is a one-time 0.6 s.
+
+### 7.10 Non-daemon executor threads make restarts slow
 
 `ThreadPoolExecutor` threads are non-daemon; without an explicit
 `shutdown(wait=False, cancel_futures=True)` on process exit, launchd
@@ -521,6 +555,7 @@ next one.
 * Checking deployment with `strings | grep` on UTF-8 (§7.1).
 * Attributing a crash to the most visible frame in the stack (§7.2).
 * Attributing a deadlock to the input that happened to trigger it (§1.2).
+* Fixing 'Stop does nothing' at one layer when four were broken (§7.8).
 * Reporting E2E latency from a machine with 100 MB free and a previous run still draining (§7.9).
 
 ---

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import logging
 import os
 import time
@@ -103,8 +104,13 @@ class Orchestrator:
 
         self._seq = 0
         self._cancel = asyncio.Event()
+        # 打断代际。每次 interrupt() +1；在飞的合成把自己开工时的代际记下来，
+        # 每块出去前比一次，不同就停。比「set 一个 Event 再换个新的」可靠：
+        # 换新 Event 之后，正在等下一块的消费者看到的已经是没 set 的新对象。
+        self._gen = 0
         self._seg_queue: asyncio.Queue = asyncio.Queue()
         self._tasks: set[asyncio.Task] = set()
+        self._side_tasks: set[asyncio.Task] = set()
         self._dead = False
         self._loop = asyncio.get_event_loop()
 
@@ -214,13 +220,25 @@ class Orchestrator:
         同传模式：丢弃未播的译文（无上下文，丢了不影响后续）。
         对话模式：已生成的文本进历史（已说出口的话要记住，否则下轮错乱）。
         """
+        self._gen += 1
         self._cancel.set()
         self._drain_queue()
         self.segmenter.reset()
+        # 文本直通的那些任务（text_input / speak）不在 worker 里，单独取消
+        for t in list(self._side_tasks):
+            t.cancel()
+        self._side_tasks.clear()
         await self.send_json({"type": "interrupted", "reason": reason})
-        log.info("interrupted (%s)", reason)
+        log.info("interrupted (%s, gen=%d)", reason, self._gen)
         # 新一轮：清掉 cancel 让 worker 继续
         self._cancel = asyncio.Event()
+
+    def track_side(self, coro, *, name: str = "") -> asyncio.Task:
+        """登记一个 worker 之外的任务（text_input / speak），让 interrupt 能取消它。"""
+        t = asyncio.ensure_future(coro)
+        self._side_tasks.add(t)
+        t.add_done_callback(self._side_tasks.discard)
+        return t
 
     def _drain_queue(self) -> None:
         """丢掉未开工的段。**不能吃掉 None 哨兵**——那是 aclose() 用来唤醒
@@ -450,6 +468,8 @@ class Orchestrator:
         tts = self.engines["tts"]
         aq: asyncio.Queue = asyncio.Queue()
         spoken = text or ""
+        stop_flag = threading.Event()
+        holder: dict = {}          # the live bridge iterator, for abort() from the consumer
 
         def _producer():
             t0 = time.perf_counter()
@@ -463,7 +483,13 @@ class Orchestrator:
                     it = tts.synthesize_stream(spoken, voice)
                 except TypeError:          # engines that predate the voice arg
                     it = tts.synthesize_stream(spoken)
+                holder["it"] = it
                 for chunk in it:
+                    if stop_flag.is_set():
+                        close = getattr(it, "close", None)
+                        if close:
+                            close()
+                        break
                     if first is None:
                         first = (time.perf_counter() - t0) * 1000
                     self._loop.call_soon_threadsafe(
@@ -472,13 +498,47 @@ class Orchestrator:
             except Exception as e:
                 self._loop.call_soon_threadsafe(aq.put_nowait, ("err", e, 0))
 
+        gen0 = self._gen
         fut = self._loop.run_in_executor(None, _producer)
+        started = False
+        n = 0
+
+        def _abort_stream():
+            # 生产线程多半阻塞在 iter_content 里；从这边直接掐 socket，
+            # bridge 在下一个 patch 看到断开就停，TTS 线程立刻空出来。
+            stop_flag.set()
+            it_ref = holder.get("it")
+            if it_ref is not None:
+                abort = getattr(it_ref, "abort", None) or getattr(it_ref, "close", None)
+                if abort:
+                    try:
+                        abort()
+                    except Exception:
+                        pass
+
+        try:
+            await self._synth_consume(seq, aq, gen0, _abort_stream)
+        except asyncio.CancelledError:
+            # interrupt() 取消了 text_input/speak 这类旁路任务：走的是这里，
+            # 不是下面那条 gen 比较的分支。同样要把 bridge 流掐掉。
+            _abort_stream()
+            log.info("synth seq=%d cancelled by interrupt", seq)
+            raise
+        finally:
+            try:
+                await asyncio.shield(fut)
+            except Exception:
+                pass
+
+    async def _synth_consume(self, seq, aq, gen0, abort_stream) -> None:
         started = False
         n = 0
         while True:
             kind, val, first = await aq.get()
             if kind == "chunk":
-                if self._cancel.is_set():
+                if self._gen != gen0 or self._cancel.is_set():
+                    abort_stream()
+                    log.info("synth seq=%d cut by interrupt after %.1fs", seq, n / OUT_SR)
                     break
                 if not started:
                     await self.send_json({
@@ -502,10 +562,6 @@ class Orchestrator:
                     "type": "error", "stage": "tts", "seq": seq,
                     "message": str(val)})
                 break
-        try:
-            await fut
-        except Exception:
-            pass
 
     async def _run_blocking(self, fn, *a, **kw):
         return await self._loop.run_in_executor(None, lambda: fn(*a, **kw))

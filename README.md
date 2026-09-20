@@ -137,6 +137,10 @@ No model weights are in this repo. `docs/MODELS.md` has download notes
 * **Keeps MLX alive under concurrency.** Thread-pinned executors, no locks
   across `yield`, warm-up through the same code path as requests. Each of
   those is a crash we had.
+* **Interrupt actually interrupts.** `ptt_start` or Stop cuts the client
+  stream, cancels the in-flight turn, and shuts the socket to the TTS so the
+  bridge stops synthesizing within one patch — next sentence in ~1 s on M2
+  instead of queuing 20 s behind a dead one.
 * **Reports failure loudly.** A press with no segment returns
   `no_speech {peak_rms, threshold, too_quiet}` so "nothing said" and "too
   quiet" can be told apart on the spot instead of in the server log.

@@ -312,7 +312,7 @@ class GenReq(BaseModel):
 
 
 @app.post("/generate")
-async def generate(req: GenReq):
+async def generate(req: GenReq, request: Request):
     tts = await _get_tts()
     loop = asyncio.get_running_loop()
 
@@ -329,6 +329,11 @@ async def generate(req: GenReq):
         # 这是真需求），通过队列把结果送回事件循环。锁不跨越 await。
         aq: asyncio.Queue = asyncio.Queue(maxsize=64)
 
+        # 客户端断开（打断）时置位；生产线程每个 patch 检查一次，看到就停。
+        # 不检查的话，一句 10 s 的译文被打断后 TTS 仍会算完全部 patch，
+        # 且因为 executor 是单线程，下一句要排在它后面。
+        stop = threading.Event()
+
         def _produce():
             try:
                 for chunk_f32, _ in tts.generate_streaming(
@@ -337,6 +342,9 @@ async def generate(req: GenReq):
                         temperature=req.temperature,
                         cfg_value=req.cfg_value,
                         warmup_patches=_tts_warmup_patches):
+                    if stop.is_set():
+                        log.info("TTS stopped by client disconnect")
+                        break
                     i16 = (np.clip(chunk_f32, -1, 1) * 32767).astype(np.int16)
                     loop.call_soon_threadsafe(aq.put_nowait, i16.tobytes())
             except Exception as e:            # noqa: BLE001
@@ -348,18 +356,33 @@ async def generate(req: GenReq):
             # 全部 TTS 生成都丢到同一个单线程 executor（见 _tts_executor），
             # 天然串行，不需要额外加锁。
             loop.run_in_executor(_tts_executor, _produce)
-            while True:
-                item = await aq.get()
-                if item is None:
-                    break
-                if isinstance(item, Exception):
-                    # Status 200 is already on the wire. Raising here makes
-                    # Starlette drop the connection mid-body, which the client
-                    # sees as a transport error — the only signal we can still
-                    # send. Swallowing it would look like a clean short sentence.
-                    log.error("TTS stream failed: %s", item)
-                    raise item
-                yield item
+            try:
+                while True:
+                    # 等下一块的同时轮询客户端是否还在：生产者每 ~300 ms 才出一块，
+                    # 若只 await aq.get()，断开要等到下一块才被发现；而 Starlette
+                    # 只在 send 失败时才 close 这个生成器——两者叠加就是打断后
+                    # TTS 仍算完整句、下一句排队 10 s+。
+                    try:
+                        item = await asyncio.wait_for(aq.get(), timeout=0.1)
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            log.info("client gone mid-stream; stopping TTS")
+                            break
+                        continue
+                    if item is None:
+                        break
+                    if isinstance(item, Exception):
+                        # Status 200 is already on the wire. Raising here makes
+                        # Starlette drop the connection mid-body, which the client
+                        # sees as a transport error — the only signal we can still
+                        # send. Swallowing it would look like a clean short sentence.
+                        log.error("TTS stream failed: %s", item)
+                        raise item
+                    yield item
+            finally:
+                # Generator closed early = client went away. Starlette calls
+                # aclose() on disconnect; this is where the interrupt lands.
+                stop.set()
 
         return StreamingResponse(_stream_pcm(), media_type="application/octet-stream")
 

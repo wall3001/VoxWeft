@@ -128,54 +128,98 @@ def _bridge_asr(audio: np.ndarray, language: str | None, hotwords) -> dict:
 
 def _bridge_tts_stream(text: str, voice: str | None = None):
     """POST /generate stream=true; bridge emits int16 @48k, we yield float32.
-    `voice` names a reference installed on the bridge (VOXWEFT_VOICE_DIR);
-    unknown ids fall back to the bridge default."""
+    `voice` names a reference installed on the bridge; unknown ids fall back
+    to the bridge default. Closing this generator closes the HTTP response,
+    which makes the bridge's producer thread fail its next write and stop —
+    that is how an interrupt reaches the TTS."""
     import requests
     body = {"target_text": text, "stream": True}
     if voice:
         body["voice"] = voice
     r = requests.post(f"{BRIDGE_URL}/generate", stream=True, timeout=180, json=body)
     r.raise_for_status()
-    buf, step = b"", TTS_CHUNK_SAMPLES * 2
-    for chunk in r.iter_content(chunk_size=step):
-        if not chunk:
-            continue
-        buf += chunk
-        while len(buf) >= step:
-            yield np.frombuffer(buf[:step], dtype=np.int16).astype(np.float32) / 32767.0
-            buf = buf[step:]
-    if len(buf) >= 2:
-        yield np.frombuffer(buf[: len(buf) // 2 * 2], dtype=np.int16).astype(np.float32) / 32767.0
+    gen = _BridgeStream(r, TTS_CHUNK_SAMPLES * 2)
+    return gen
 
 
-VOICE_PROMPT_WAV = os.environ.get("VOXWEFT_VOICE_PROMPT_WAV", "")
-VOICE_PROMPT_ID = os.environ.get("VOXWEFT_VOICE_ID", "default")
+class _BridgeStream:
+    """Iterator over a streaming /generate response with a *forceful* abort.
+
+    `Response.close()` on a half-read stream only returns the connection to
+    urllib3's pool; the TCP socket stays open, the bridge never learns the
+    client is gone and keeps synthesizing on its single TTS thread — the
+    next sentence then queues behind a dead one (measured: 15–19 s). `abort()`
+    shuts the raw socket, which surfaces on the bridge as a failed write /
+    `request.is_disconnected()` within one chunk."""
+
+    def __init__(self, r, step: int):
+        self._r = r
+        self._it = r.iter_content(chunk_size=step)
+        self._step = step
+        self._buf = b""
+        self._done = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        step = self._step
+        while len(self._buf) < step and not self._done:
+            try:
+                chunk = next(self._it)
+            except StopIteration:
+                self._done = True
+                break
+            if chunk:
+                self._buf += chunk
+        if len(self._buf) >= step:
+            out, self._buf = self._buf[:step], self._buf[step:]
+        elif self._done and len(self._buf) >= 2:
+            out, self._buf = self._buf[: len(self._buf) // 2 * 2], b""
+        else:
+            self._r.close()
+            raise StopIteration
+        return np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32767.0
+
+    def abort(self):
+        try:
+            raw = self._r.raw
+            sock = getattr(getattr(raw, "_fp", None), "raw", None)
+            sock = getattr(sock, "_sock", None) or getattr(raw, "_connection", None)
+            if sock is not None and hasattr(sock, "sock") and sock.sock is not None:
+                sock.sock.shutdown(2)
+            elif hasattr(sock, "shutdown"):
+                sock.shutdown(2)
+        except Exception:
+            pass
+        try:
+            self._r.raw.close()
+        except Exception:
+            pass
+        try:
+            self._r.close()
+        except Exception:
+            pass
+
+    close = abort
 
 
 def _ensure_bridge_voice():
-    """Pin the TTS speaker on the bridge if the operator configured one.
-
-    Without a reference the model draws a fresh speaker per call, so two
-    segments of one utterance can come out in different voices; and the
-    bridge forgets any /add_prompt on restart. Re-check on every engine load
-    so a bridge restart under a long-lived server heals itself."""
-    if not VOICE_PROMPT_WAV:
-        log.warning("VOXWEFT_VOICE_PROMPT_WAV not set — zero-shot voice, timbre may "
-                    "vary between segments. Point it at a ~5 s wav to pin one.")
-        return
+    """Log which voices the bridge has. The bridge installs the seed voices
+    from voxweft.db itself; this is a visibility check so a bridge that came
+    up without them is obvious in the server log, not a silent zero-shot."""
     import requests
     try:
-        have = [p.get("external_id") for p in
-                requests.get(f"{BRIDGE_URL}/available_prompts", timeout=10).json().get("prompts", [])]
-        if VOICE_PROMPT_ID in have:
-            return
-        wav_b64 = base64.b64encode(open(VOICE_PROMPT_WAV, "rb").read()).decode()
-        requests.post(f"{BRIDGE_URL}/add_prompt", timeout=120,
-                      json={"wav_base64": wav_b64, "external_id": VOICE_PROMPT_ID,
-                            "prompt_text": "", "denoise": False}).raise_for_status()
-        log.info("voice %r installed on bridge from %s", VOICE_PROMPT_ID, VOICE_PROMPT_WAV)
+        d = requests.get(f"{BRIDGE_URL}/voices", timeout=10).json()
+        ids = [v.get("external_id") for v in d.get("voices", [])]
+        if ids:
+            log.info("bridge voices: %d (%s…)", len(ids), ", ".join(ids[:4]))
+        else:
+            log.warning("bridge has NO voices installed — zero-shot timbre will vary "
+                        "between segments. Run `python -m voxweft.db build` or set "
+                        "VOXWEFT_VOICE_DIR.")
     except Exception as e:
-        log.warning("voice registration failed (continuing zero-shot): %s", e)
+        log.warning("could not query bridge voices: %s", e)
 
 
 class _ASREngine:
@@ -462,7 +506,7 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
             elif mt == "text_input":
                 txt = (obj.get("text") or "").strip()
                 if txt:
-                    asyncio.ensure_future(_text_turn(
+                    state["orch"].track_side(_text_turn(
                         state["orch"], txt, send_json,
                         speak_source=bool(obj.get("speak_source", True))))
 
@@ -474,8 +518,8 @@ async def ws_voice_v2(ws: WebSocket, token: str = Query(default="")):
                 # buffered from the same utterance.
                 txt = (obj.get("text") or "").strip()
                 if txt:
-                    asyncio.ensure_future(_speak_text(state["orch"], txt,
-                                                      int(obj.get("seq") or 0), send_json))
+                    state["orch"].track_side(_speak_text(state["orch"], txt,
+                                                         int(obj.get("seq") or 0), send_json))
 
             elif mt == "canon":
                 # Verified source→target pairs for a known demo clip. Hit ⇒ skip

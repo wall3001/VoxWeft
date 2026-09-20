@@ -38,13 +38,26 @@ final class AudioEngine {
     // 直接转发会让服务端拿到非对齐的帧长。
     private var pendingMic = Data()
 
-    // 下行抖动缓冲：服务端按 200ms 一块发，但 WS 消息边界不一定和它对齐
-    // （TCP 分片、代理重组都会改边界）。每收到一小段就 scheduleBuffer 一次，
-    // AVAudioPlayerNode 会在每个 buffer 边界各自做重采样/衔接，听感是周期性
-    // 「咔」。所以这里是攒到整块再交给节点——用一个小延迟换边界干净。
+    // 下行播放缓冲。
+    //
+    // 两件事在这里一起解决：
+    //  1. WS 消息边界和服务端 200 ms 块不对齐 → 攒到整块再 scheduleBuffer，
+    //     不然节点在每个碎片边界各自衔接，听感是周期性「咔」。
+    //  2. 服务端产出可能**慢于实时**（M2 上 TTS RTF ≈ 1.5：每 ~300 ms 才来
+    //     200 ms 音频）。逐块即到即播，播放器每播完一块就饿 ~100 ms，听感是
+    //     一卡一顿的细碎断裂——不是采样率问题，是喂不上。所以开播前先攒
+    //     preroll 秒，播放中队列见底就重新进入攒料状态，用一次性的启动延迟
+    //     换连续播放。RTF > 1 时每句仍会有一次卡顿（攒的 preroll 用完之后），
+    //     preroll 越大越少；实时机器上（M3 Ultra）preroll 只是一次 0.6 s 延迟。
     private var pendingPlay = Data()
     private let playChunkBytes = 9600 * 2      // 200ms @48kHz，与服务端一致
     private var playFlushTimer: Timer?
+    /// 攒料阈值（字节）。0.6 s @48k int16。
+    private let prerollBytes = 48000 * 2 * 6 / 10
+    /// true = 正在攒料，攒够 preroll 前不向节点排队
+    private var buffering = true
+    /// 已排队未播完的 buffer 数（在 completion 回调里递减）
+    private var queued = 0
 
     // MARK: - 生命周期
 
@@ -150,22 +163,30 @@ final class AudioEngine {
     // MARK: - 播放
 
     /// 播放服务端下行的一块 PCM16。`sampleRate` 变了会自动重建连接。
-    ///
-    /// 数据先进抖动缓冲，攒够 200ms 再交给播放节点——见 pendingPlay 的注释。
     func play(_ data: Data, sampleRate: Double) {
         guard isRunning, !data.isEmpty else { return }
-
         if abs(playFormat.sampleRate - sampleRate) > 1 {
             rebuildPlayback(sampleRate: sampleRate)
         }
-
         pendingPlay.append(data)
-        drainPlaybackBuffer()
-
-        // 尾部不足一块的情况：定时器兜底，别让最后几十毫秒卡在缓冲里
-        if !pendingPlay.isEmpty {
-            scheduleFlushTimer()
+        if buffering && pendingPlay.count < prerollBytes {
+            scheduleFlushTimer()           // 句子比 preroll 还短时兜底
+            return
         }
+        buffering = false
+        drainPlaybackBuffer()
+        if !pendingPlay.isEmpty { scheduleFlushTimer() }
+    }
+
+    /// 服务端说这一段结束了：把尾巴冲出去，不必等 preroll。
+    func endOfUtterance() {
+        playFlushTimer?.invalidate(); playFlushTimer = nil
+        buffering = false
+        drainPlaybackBuffer()
+        if !pendingPlay.isEmpty {
+            let rest = pendingPlay; pendingPlay.removeAll(); enqueue(rest)
+        }
+        buffering = true                    // 下一段重新攒料
     }
 
     /// 把攒够的整块交给播放节点。
@@ -177,15 +198,18 @@ final class AudioEngine {
         }
     }
 
+    /// 尾块不足一整块、且一段时间没有新数据：也播掉，别吞句尾。
+    /// 间隔比服务端最慢出块间隔（M2 ~300 ms）长，避免把正在攒的料截成碎片。
     private func scheduleFlushTimer() {
         playFlushTimer?.invalidate()
-        playFlushTimer = Timer.scheduledTimer(withTimeInterval: 0.12,
+        playFlushTimer = Timer.scheduledTimer(withTimeInterval: 0.5,
                                               repeats: false) { [weak self] _ in
             guard let self, !self.pendingPlay.isEmpty else { return }
-            // 尾块不足 200ms 也要播——否则句尾会被吞掉
+            self.buffering = false
             let rest = self.pendingPlay
             self.pendingPlay.removeAll()
             self.enqueue(rest)
+            self.buffering = true
         }
     }
 
@@ -211,7 +235,18 @@ final class AudioEngine {
         if let ch = buf.floatChannelData?[0] {
             onSpeakerLevel?(Self.rms(ch, n))
         }
-        player.scheduleBuffer(buf)
+        queued += 1
+        player.scheduleBuffer(buf) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.queued -= 1
+                // 队列见底 = 服务端没跟上。回到攒料状态，下一次攒够 preroll
+                // 再续播，而不是每来一块播一块地断续。
+                if self.queued == 0 && self.pendingPlay.count < self.prerollBytes {
+                    self.buffering = true
+                }
+            }
+        }
     }
 
     private func rebuildPlayback(sampleRate: Double) {
@@ -233,6 +268,8 @@ final class AudioEngine {
         playFlushTimer?.invalidate()
         playFlushTimer = nil
         pendingPlay.removeAll()
+        buffering = true
+        queued = 0
         player.stop()
         player.play()
     }

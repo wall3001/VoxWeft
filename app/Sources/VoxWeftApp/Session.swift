@@ -138,7 +138,12 @@ final class Session: ObservableObject {
         sendNextDemoLine()
     }
 
-    func stopIntro() { demoQueue.removeAll(); demoTimer?.invalidate() }
+    func stopIntro() {
+        demoQueue.removeAll(); demoTimer?.invalidate(); demoTimer = nil
+        sourcePlaying = false
+        interrupt()
+        status = "connected"
+    }
 
     private func sendNextDemoLine() {
         guard !demoQueue.isEmpty else { status = "connected"; return }
@@ -177,6 +182,7 @@ final class Session: ObservableObject {
             // interpretation, not the read-out.
             sourcePlaying = true
         case "audio_end":
+            audio.endOfUtterance()
             if sourcePlaying { sourcePlaying = false; turnStart = Date() }
         case "audio_start":
             if sourcePlaying { break }
