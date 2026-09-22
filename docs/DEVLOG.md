@@ -547,6 +547,18 @@ Free memory was 100 MB. After `pkill`: 9.8 GB free, 2.5 s commit-to-audio.
 Rule: `vm_stat` before every latency claim; kill the previous run before the
 next one.
 
+### 7.11 `pip install -e ".[mcp]"` installed a server that could not start
+
+Reported the day after publishing. `mcp>=1.0` in the extra resolved to
+mcp 2.2.0, which renamed `FastMCP` to `MCPServer` and deleted
+`mcp.server.fastmcp`; `voxweft mcp` died on import. The headline
+integration — "point Claude Code / Codex at the clone" — was broken for
+every fresh install. The three calls we use are identical in both majors,
+so the fix is a two-line import shim, verified with a real stdio
+`initialize` + `tools/list` handshake against both 1.9.4 and 2.2.0.
+Lesson: a floor-only pin (`>=1.0`) on a dependency with a pre-1.0-style
+release cadence is a bug waiting for the next major.
+
 ## 8. Measurement mistakes we made (so you don't)
 
 * Concluding from 7 samples (§5.1).

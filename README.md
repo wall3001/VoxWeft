@@ -108,7 +108,8 @@ for chunk, i in pipe.generate_streaming("text", ref_latents=pipe.encode_referenc
 ```
 
 MCP, for Claude Code / Codex / Cursor / anything that speaks MCP — point the
-harness at the venv inside your clone, no global install:
+harness at the venv inside your clone, no global install. Works with the
+`mcp` Python SDK 1.x and 2.x (2.x renamed `FastMCP`; the server adapts):
 
 ```jsonc
 {"mcpServers": {"voxweft": {

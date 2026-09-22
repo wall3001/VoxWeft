@@ -11,9 +11,15 @@ Config example (Claude Code `.mcp.json`):
 import os
 import tempfile
 
-from mcp.server.fastmcp import FastMCP
+# mcp 2.x renamed FastMCP → MCPServer (mcp.server.mcpserver) and removed the
+# old module; 1.x only has FastMCP. The three calls we make — construct,
+# `.tool()`, `.run()` — have the same shape in both, so one alias covers it.
+try:
+    from mcp.server.mcpserver import MCPServer as _Server        # mcp >= 2.0
+except ImportError:                                               # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _Server
 
-mcp = FastMCP("voxweft")
+mcp = _Server("voxweft")
 _pipe = None
 
 
