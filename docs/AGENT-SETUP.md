@@ -14,8 +14,10 @@ python3 --version        # 3.10+
 sysctl -n hw.memsize | awk '{print $1/1073741824 " GB"}'   # 16 GB minimum; see docs/HARDWARE.md
 ```
 
-If `uname -m` is not `arm64`, stop and tell the user: this project does not
-run on Intel Macs or Linux.
+If `uname -m` is not `arm64`, stop the Mac procedure and tell the user: this
+project does not run on Intel Macs or Linux. A Linux host can still install
+the package and run the model-free tests; that partial procedure, and the
+handoff back to this file, is in [`LINUX.md`](LINUX.md).
 
 ## 1. Environment
 
